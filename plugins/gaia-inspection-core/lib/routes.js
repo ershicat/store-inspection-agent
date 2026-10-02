@@ -130,11 +130,16 @@ function buildSnapshot(nsGetter) {
     .sort((a, b) => String(a.storeId || a.id).localeCompare(String(b.storeId || b.id)))
   const inspections = all('inspections').slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   const findings = all('findings')
+  // 真实模型调用次数：按 inspectionId 归属统计（一次提交通常是 checklist_generate + vision_judge 两次）。
+  // 提供这个字段是因为前端早先把「模型调用 N 次」写死成"有判断就是 1 次"，与日志里的实际条数不符。
+  const modelCalls = all('model_calls')
   const actions = all('actions').slice().sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
   const evidences = all('evidences')
   const now = Date.now()
   const snapshotInspections = inspections.map((ins) => {
     const mine = findings.filter((f) => f.inspectionId === ins.id)
+    const myActions = actions.filter((a) => a.inspectionId === ins.id)
+    const lastAction = myActions.length > 0 ? myActions[myActions.length - 1] : null
     const overdue = Boolean(ins.dueAt) && new Date(ins.dueAt).getTime() < now && ins.status !== 'rectified' && ins.status !== 'closed'
     const escalated = ins.status === 'escalated'
     return {
@@ -150,9 +155,33 @@ function buildSnapshot(nsGetter) {
       dueAt: ins.dueAt ?? null,
       overdue,
       escalated,
+      // ── 退回闭环（用户实测反馈：督导点完"退回并说明"后，界面上找不到退到哪去了）──
+      // 后端本来就把退回写下来了（ins.rejectedAt / finding.rejectedReason / 一条 actions 记录），
+      // 但快照没露出来 → 督导端只能靠详情最底部那行时间线，店长端更是完全看不到。这里补四个字段：
+      //   returnedAt     最近一次被退回的时间（没退回过则 null）
+      //   returnedCount  被退回过的次数（点了好几次也看得出来）
+      //   reworkOf       本单是"整改回拍"自哪一张（null = 不是回拍单）
+      //   lastAction     最近一条人工动作（谁 / 什么时候 / 什么结果 / 什么原因）
+      returnedAt: ins.rejectedAt ?? null,
+      returnedCount: myActions.filter((a) => a.type === '退回并说明' || a.actionCode === 'review_reject').length,
+      reworkOf: ins.reworkOf ?? null,
+      lastAction: lastAction
+        ? {
+            id: lastAction.id,
+            type: lastAction.type ?? null,
+            actionCode: lastAction.actionCode ?? null,
+            at: lastAction.createdAt ?? null,
+            actor: lastAction.actorName || lastAction.actor || null,
+            reason: lastAction.reason ?? null,
+            result: lastAction.result ?? null,
+            target: lastAction.target ?? null,
+            dueAt: lastAction.dueAt ?? null,
+          }
+        : null,
       items: Array.isArray(ins.items) ? ins.items : [],
       reasons: ins.reasons ?? '',
       unreadable: Array.isArray(ins.unreadable) ? ins.unreadable : [],
+      modelCallCount: modelCalls.filter((c) => c && c.inspectionId === ins.id).length,
       findings: mine.map((f) => ({
         findingId: f.id,
         itemName: f.itemName ?? null,
@@ -164,6 +193,9 @@ function buildSnapshot(nsGetter) {
         suggestion: f.suggestion ?? '',
         dueAt: f.dueAt ?? null,
         status: f.status ?? 'pending_rectify',
+        // 这条判断被退回过的痕迹（店长端整改时要看的就是它）
+        rejectedAt: f.rejectedAt ?? null,
+        rejectedReason: f.rejectedReason ?? null,
         boxes: Array.isArray(f.boxes) ? f.boxes : [],
         boxesUnit: 'ratio',
         evidenceId: (evidences.find((e) => e.findingId === f.id) || {}).id ?? null,
@@ -350,8 +382,23 @@ export function asReceipt(value, fallbackSummary) {
 }
 
 // ── 注册 ─────────────────────────────────────────────────────────────────────
+/**
+ * 取 webServer：优先走**声明式依赖后**的 ctx.webServer（ctx.inject(['webServer']) 回调里传入的 ctx），
+ * 再退回 ctx.get('webServer')。直接同步 ctx.get 在真机会拿到 undefined —— 见 lib/index.js 里的说明。
+ */
+function resolveWebServer(ctx) {
+  if (!ctx) return undefined
+  const direct = ctx.webServer
+  if (direct && typeof direct.register === 'function') return direct
+  if (typeof ctx.get === 'function') {
+    const viaGet = ctx.get('webServer')
+    if (viaGet && typeof viaGet.register === 'function') return viaGet
+  }
+  return undefined
+}
+
 export function registerRoutes(ctx, nsGetter, logger) {
-  const webServer = ctx && typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+  const webServer = resolveWebServer(ctx)
   if (!webServer || typeof webServer.register !== 'function') {
     logger.warn('[gaia-inspection-core] 宿主未提供 webServer：/api/gaia-inspection/* 路由未注册（看板将显示"数据不可用"）')
     return { registered: [], dispose: () => {} }

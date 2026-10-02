@@ -31,6 +31,8 @@ window.__ModuleLoader__.load({
     const CAPABILITY_EVIDENCE = '证据挂图卡片'
     const CAPABILITY_SCAN = '立即扫描按钮'
     const CAPABILITY_LOGS = '模型调用日志面板'
+    // InspectionApp（已定稿）里的店长端屏标题读的就是这个能力词；补齐定义，否则进店长端即 ReferenceError。
+    const CAPABILITY_CAPTURE = '门店自查采集入口'
 
     const SNAPSHOT_PATH = '/api/gaia-inspection/snapshot'
     const EVIDENCE_PATH = '/api/gaia-inspection/evidence'
@@ -83,79 +85,370 @@ window.__ModuleLoader__.load({
     const LOGS_MASKING_TEXT = '记录来自后端 model_calls 表（真实调用留痕、不许事后补写）；前端只读，且只展示业务摘要——不请求、不展示凭据类字段。'
     const LOGS_MISSING_TEXT = '的这几列「提示词版本 / 请求摘要 / 响应摘要」后端暂未提供（显示 —）：口径需 gaia-inspection-core 的 model_calls 记录补齐；前端不代填、不臆造。'
 
+    /**
+     * 样式层（前端重做 §2 + make-interfaces-feel-better）。
+     *
+     * 令牌只此一套，值只许来自指令 §2 的三张表；本包自声明、不依赖另一个包。
+     *   · 圆角四个值：卡片 18 / 内部块 12 / 按钮与输入框 10 / 胶囊 999
+     *   · 同心规则：外圆角 = 内圆角 + 内边距。落地口径——含 10px 控件的卡片内边距取 8（18 = 10 + 8）；
+     *     纯文字块不产生嵌套圆角，可用 12 / 16 内边距；贴边的动作条交给父级 overflow 裁切，不另造圆角。
+     *   · 阴影只有两级，都用 rgba 透明黑，禁止纯黑。
+     *   · 边框只表达结构与状态（分隔线 / 选中 / 焦点），不用来假装高度；按钮的 1px 圈一律用 box-shadow 画。
+     *   · 字号只有三档：20 标题 / 13 正文 / 11 辅助。
+     *   · 动效一律 transition 且写全属性名（禁止 transition: all），150–200ms ease-out；高频操作不加自定义动画。
+     */
     const CSS = `
-.giou-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(1080px, 82vw); display: flex; flex-direction: column; background: var(--dsw-color-bg, #fff); color: var(--dsw-color-fg, #1f2329); border-left: 1px solid var(--dsw-color-border, #e5e6eb); box-shadow: -10px 0 34px rgba(0,0,0,.16); font-size: 12px; line-height: 1.55; box-sizing: border-box; overflow: hidden; }
-.giou-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; border-bottom: 1px solid var(--dsw-color-border, #e5e6eb); }
-.giou-title { font-weight: 600; font-size: 13px; margin-right: auto; }
-.giou-stats { font-size: 12px; color: #646a73; white-space: nowrap; }
-.giou-stats b { color: #1f2329; }
-.giou-stats .bad { color: #cf1322; }
-.giou-btn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 6px; padding: 2px 9px; font: inherit; font-size: 11px; line-height: 1.7; cursor: pointer; background: transparent; color: inherit; }
-.giou-btn:hover:not([disabled]) { border-color: var(--dsw-color-primary, #4e6ef2); color: var(--dsw-color-primary, #4e6ef2); }
-.giou-btn[disabled] { opacity: .5; cursor: not-allowed; }
-.giou-btn.primary { border-color: var(--dsw-color-primary, #4e6ef2); color: var(--dsw-color-primary, #4e6ef2); }
-.giou-tabs { display: inline-flex; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 999px; overflow: hidden; }
-.giou-tabs button { border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; padding: 3px 12px; cursor: pointer; }
-.giou-tabs button[data-on="1"] { background: var(--dsw-color-primary, #4e6ef2); color: #fff; }
-.giou-line { border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 8px; padding: 5px 8px; font-size: 11px; color: #646a73; }
-.giou-line.warn { border-color: #ffe58f; background: rgba(255,229,143,.16); color: #ad6800; }
-.giou-line.err { border-color: #ffccc7; background: rgba(255,204,199,.16); color: #cf1322; }
-.giou-line.ok { border-color: #b7eb8f; background: rgba(183,235,143,.16); color: #237804; }
-.giou-body { flex: 1; min-height: 0; display: flex; }
-.giou-left { width: 320px; flex: none; border-right: 1px solid var(--dsw-color-border, #e5e6eb); display: flex; flex-direction: column; min-height: 0; }
-.giou-filters { display: flex; gap: 4px; padding: 7px 9px; border-bottom: 1px solid var(--dsw-color-border, #e5e6eb); }
-.giou-filters button { border: 1px solid var(--dsw-color-border, #e5e6eb); background: transparent; color: inherit; font: inherit; font-size: 11px; border-radius: 999px; padding: 2px 10px; cursor: pointer; }
-.giou-filters button[data-on="1"] { border-color: var(--dsw-color-primary, #4e6ef2); color: var(--dsw-color-primary, #4e6ef2); }
-.giou-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
-.giou-item { display: flex; gap: 8px; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 9px; padding: 6px 7px; background: transparent; color: inherit; text-align: left; cursor: pointer; width: 100%; box-sizing: border-box; font: inherit; }
-.giou-item[data-on="1"] { border-color: var(--dsw-color-primary, #4e6ef2); background: rgba(78,110,242,.06); }
-.giou-item[data-overdue="1"] { border-color: #ff7875; background: rgba(255,120,117,.07); }
-.giou-item[data-overdue="1"] .id, .giou-item[data-overdue="1"] .meta { color: #cf1322; }
-.giou-item img { width: 46px; height: 46px; object-fit: cover; border-radius: 6px; flex: none; background: #000; }
-.giou-item .ph { width: 46px; height: 46px; border-radius: 6px; flex: none; background: var(--dsw-color-bg-2, #f7f8fa); color: #8a9099; font-size: 9px; display: flex; align-items: center; justify-content: center; text-align: center; }
-.giou-item .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.giou-item .id { font-weight: 600; font-size: 11px; }
-.giou-item .meta { font-size: 10px; color: #8a9099; }
-.giou-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; border: 1px solid var(--dsw-color-border, #e5e6eb); color: #646a73; white-space: nowrap; }
-.giou-badge[data-tone="overdue"], .giou-badge[data-tone="escalated"] { border-color: #ff7875; color: #cf1322; background: rgba(255,120,117,.10); }
-.giou-badge[data-tone="pending_rectify"] { border-color: #ffe58f; color: #ad6800; background: rgba(255,229,143,.16); }
-.giou-badge[data-tone="rectified"], .giou-badge[data-tone="approved"] { border-color: #b7eb8f; color: #237804; background: rgba(183,235,143,.16); }
-.giou-right { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 10px 12px 18px; display: flex; flex-direction: column; gap: 9px; }
-.giou-h2 { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.giou-quote { border-left: 3px solid var(--dsw-color-border, #e5e6eb); padding: 2px 9px; color: #646a73; font-size: 12px; }
-.giou-statusrow { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 11px; color: #646a73; }
-.giou-why { border: 1px solid #d6e4ff; background: #f0f5ff; border-radius: 9px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
-.giou-why .h { font-weight: 600; font-size: 11px; color: #0958d9; }
-.giou-why .r { font-size: 11px; color: #1f2329; }
-.giou-card { border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 9px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
-.giou-card .head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.giou-card .nm { font-weight: 600; }
-.giou-conf { border-radius: 999px; padding: 0 8px; font-size: 10px; border: 1px solid var(--dsw-color-border, #e5e6eb); }
-.giou-conf[data-level="high"] { border-color: #b7eb8f; color: #237804; }
-.giou-conf[data-level="mid"] { border-color: #ffe58f; color: #ad6800; }
-.giou-conf[data-level="low"] { border-color: #ffccc7; color: #cf1322; }
-.giou-field { display: grid; grid-template-columns: 58px 1fr; gap: 2px 8px; font-size: 11px; }
-.giou-field .k { color: #8a9099; }
-.giou-field .v { word-break: break-word; }
-.giou-photos { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
-.giou-shot { border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 9px; overflow: hidden; background: #000; position: relative; max-width: 100%; }
-.giou-shot img { display: block; max-width: 100%; max-height: 340px; }
-.giou-mark { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: #ff3b30; box-shadow: 0 0 0 2px rgba(255,255,255,.85); pointer-events: none; }
-.giou-frame { position: absolute; border: 2px solid #ff3b30; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,.65) inset; pointer-events: none; }
-.giou-basis { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 5px; }
-.giou-timeline { display: flex; flex-direction: column; gap: 2px; border-left: 2px solid var(--dsw-color-border, #e5e6eb); padding-left: 8px; margin-left: 2px; font-size: 10px; color: #646a73; }
-.giou-timeline b { color: #1f2329; }
-.giou-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.giou-note { width: 100%; min-height: 40px; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 11px; background: transparent; color: inherit; box-sizing: border-box; }
-.giou-empty { border: 1px dashed var(--dsw-color-border, #e5e6eb); border-radius: 9px; padding: 14px; text-align: center; color: #8a9099; font-size: 11px; }
-.giou-skel { height: 52px; border-radius: 9px; background: linear-gradient(90deg, rgba(0,0,0,.05), rgba(0,0,0,.10), rgba(0,0,0,.05)); }
-.giou-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.giou-table th { text-align: left; color: #8a9099; font-weight: 600; border-bottom: 1px solid var(--dsw-color-border, #e5e6eb); padding: 4px 5px; white-space: nowrap; }
-.giou-table td { border-bottom: 1px solid var(--dsw-color-border, #e5e6eb); padding: 4px 5px; vertical-align: top; word-break: break-word; }
-.giou-table tr[data-bad="1"] td { color: #cf1322; }
-.giou-table .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
-.giou-dockbtn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; background: transparent; color: inherit; }
-.giou-dockbtn:hover { border-color: var(--dsw-color-primary, #4e6ef2); color: var(--dsw-color-primary, #4e6ef2); }
+/* 令牌声明在 :root —— 会话 header / 输入区这些入口挂在 .giou-root 之外，落在 :root 上才取得到值。 */
+:root {
+  --gi-bg: #EEF0F4;
+  --gi-card: #FFFFFF;
+  --gi-ink: #101319;
+  --gi-ink-2: #5D6472;
+  --gi-ink-3: #8A909C;
+  --gi-line: #E2E5EB;
+  --gi-accent: #1D4ED8;
+  --gi-dark: #161A20;
+  --gi-warn-bg: #FFF3E6;
+  --gi-warn-ink: #9A4A00;
+  --gi-r-card: 18px;
+  --gi-r-block: 12px;
+  --gi-r-ctl: 10px;
+  --gi-r-pill: 999px;
+  --gi-s1: 4px; --gi-s2: 8px; --gi-s3: 12px; --gi-s4: 16px;
+  --gi-s6: 24px; --gi-s8: 32px; --gi-s10: 40px;
+  --gi-shadow-card: 0 2px 8px rgba(16,19,25,.06);
+  --gi-shadow-pop: 0 10px 28px rgba(16,19,25,.18);
+  --gi-fs-title: 20px; --gi-fs-body: 13px; --gi-fs-aux: 11px;
+  --gi-ease: cubic-bezier(.2,0,0,1);
+}
+.giou-root {
+  box-sizing: border-box;
+  height: 100%; min-height: 0; width: 100%;
+  display: flex; flex-direction: column;
+  background: var(--gi-bg); color: var(--gi-ink);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: var(--gi-fs-body); line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.giou-root *, .giou-root *::before, .giou-root *::after { box-sizing: border-box; }
+.giou-num { font-variant-numeric: tabular-nums; }
+.giou-scroll { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #C7CCD6 transparent; }
+.giou-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.giou-scroll::-webkit-scrollbar-thumb { background: #C7CCD6; border: 3px solid transparent; border-radius: var(--gi-r-pill); background-clip: content-box; }
+@media (prefers-reduced-motion: reduce) { .giou-root * { transition-duration: 1ms !important; animation-duration: 1ms !important; } }
+
+/* ── 控件（四态齐全；禁用态一律灰化，主 CTA 也不保留品牌色）────────────── */
+.giou-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--gi-s2);
+  min-height: 44px; padding: 0 var(--gi-s4);
+  border: 0; border-radius: var(--gi-r-ctl);
+  background: var(--gi-card); color: var(--gi-ink);
+  box-shadow: 0 0 0 1px var(--gi-line);
+  font: inherit; font-size: var(--gi-fs-body); cursor: pointer; white-space: nowrap;
+  transition-property: background-color, box-shadow, color, scale;
+  transition-duration: 160ms; transition-timing-function: var(--gi-ease);
+}
+.giou-btn:hover:not([disabled]) { background: #F7F8FA; box-shadow: 0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.giou-btn:active:not([disabled]) { scale: .96; }
+.giou-btn:focus-visible { outline: 2px solid var(--gi-accent); outline-offset: 2px; }
+.giou-btn[disabled] { background: #F1F2F5; color: #A9AFBA; box-shadow: 0 0 0 1px #E4E7ED; cursor: not-allowed; }
+.giou-btn.primary { background: var(--gi-accent); color: #fff; box-shadow: var(--gi-shadow-card); }
+.giou-btn.primary:hover:not([disabled]) { background: #1A46C2; }
+.giou-btn.primary[disabled] { background: #F1F2F5; color: #A9AFBA; box-shadow: 0 0 0 1px #E4E7ED; }
+.giou-btn.quiet { background: transparent; color: var(--gi-ink-2); box-shadow: none; }
+.giou-btn.quiet:hover:not([disabled]) { background: rgba(16,19,25,.05); box-shadow: none; }
+.giou-btn.quiet[disabled] { background: transparent; box-shadow: none; color: #B4B9C3; }
+.giou-btn.danger { background: var(--gi-dark); color: #fff; box-shadow: var(--gi-shadow-card); }
+.giou-btn.danger:hover:not([disabled]) { background: #232833; }
+/* 开关类按钮的「开」态用深色块，不占强调色——一屏只给一个主 CTA 用 #1D4ED8。 */
+.giou-btn[data-on="1"] { background: var(--gi-dark); color: #FFFFFF; }
+.giou-btn[data-on="1"]:hover:not([disabled]) { background: #232833; box-shadow: var(--gi-shadow-card); }
+
+.giou-seg { display: inline-flex; align-items: center; gap: var(--gi-s2); padding: var(--gi-s1); border-radius: var(--gi-r-pill); background: #E4E7ED; }
+.giou-seg button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 var(--gi-s4);
+  border: 0; border-radius: var(--gi-r-pill); background: transparent; color: var(--gi-ink-2);
+  font: inherit; font-size: var(--gi-fs-body); cursor: pointer; white-space: nowrap;
+  transition-property: background-color, color, box-shadow, scale; transition-duration: 160ms; transition-timing-function: var(--gi-ease);
+}
+.giou-seg button:hover:not([data-on="1"]) { color: var(--gi-ink); background: rgba(255,255,255,.6); }
+.giou-seg button:active { scale: .96; }
+.giou-seg button:focus-visible { outline: 2px solid var(--gi-accent); outline-offset: 2px; }
+.giou-seg button[data-on="1"] { background: var(--gi-card); color: var(--gi-ink); box-shadow: var(--gi-shadow-card); }
+
+.giou-input, .giou-note {
+  width: 100%; border: 0; border-radius: var(--gi-r-ctl); padding: var(--gi-s3);
+  background: var(--gi-card); color: var(--gi-ink); box-shadow: 0 0 0 1px var(--gi-line);
+  font: inherit; font-size: var(--gi-fs-body);
+  transition-property: box-shadow; transition-duration: 160ms; transition-timing-function: var(--gi-ease);
+}
+.giou-input:focus-visible, .giou-note:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--gi-accent); }
+.giou-input[disabled], .giou-note[disabled] { background: #F1F2F5; color: #A9AFBA; box-shadow: 0 0 0 1px #E4E7ED; cursor: not-allowed; }
+.giou-note { min-height: 88px; resize: vertical; }
+
+/* ── 壳：顶部一行（标题 + 两端/日志切换 + 动作）──────────────────────── */
+.giou-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.giou-top { display: flex; align-items: center; gap: var(--gi-s3); padding: var(--gi-s3) var(--gi-s4); background: var(--gi-bg); border-bottom: 1px solid var(--gi-line); flex-wrap: wrap; }
+.giou-topmain { display: flex; flex-direction: column; gap: var(--gi-s1); min-width: 0; }
+.giou-title { font-size: var(--gi-fs-title); font-weight: 600; letter-spacing: -.01em; text-wrap: balance; }
+.giou-sub { font-size: var(--gi-fs-aux); color: var(--gi-ink-3); text-wrap: pretty; }
+.giou-grow { flex: 1 1 auto; }
+.giou-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.giou-pad { padding: var(--gi-s6) var(--gi-s4); }
+
+/* ── 首屏：角色选择（对角错位两卡）──────────────────────────────────── */
+.giou-roles { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: var(--gi-s8); padding: var(--gi-s8) var(--gi-s6) var(--gi-s10); align-content: center; width: 100%; max-width: 960px; margin: 0 auto; }
+.giou-role { position: relative; display: flex; flex-direction: column; border-radius: var(--gi-r-card); background: var(--gi-card); box-shadow: var(--gi-shadow-card); overflow: hidden; }
+.giou-role.manager { grid-column: 1; grid-row: 1; margin-bottom: var(--gi-s8); }
+.giou-role.supervisor { grid-column: 2; grid-row: 2; margin-top: var(--gi-s8); background: var(--gi-dark); color: #F4F6F9; }
+.giou-role-body { padding: var(--gi-s4); display: flex; flex-direction: column; gap: var(--gi-s2); }
+.giou-role-name { font-size: var(--gi-fs-title); font-weight: 600; text-wrap: balance; }
+.giou-role-why { font-size: var(--gi-fs-body); color: var(--gi-ink-2); text-wrap: pretty; }
+.giou-role.supervisor .giou-role-why { color: #B9C0CC; }
+.giou-role-hint { display: flex; align-items: center; gap: var(--gi-s2); font-size: var(--gi-fs-aux); color: var(--gi-ink-3); }
+.giou-role.supervisor .giou-role-hint { color: #8E97A6; }
+.giou-role-cta { min-height: 44px; width: 100%; border: 0; cursor: pointer; font: inherit; font-size: var(--gi-fs-body); background: #F4F6F9; color: var(--gi-ink); transition-property: background-color; transition-duration: 160ms; transition-timing-function: var(--gi-ease); }
+.giou-role-cta:hover { background: #E9ECF2; }
+.giou-role-cta:active { scale: .96; }
+.giou-role-cta:focus-visible { outline: 2px solid var(--gi-accent); outline-offset: -2px; }
+.giou-role.supervisor .giou-role-cta { background: #232833; color: #fff; }
+.giou-role.supervisor .giou-role-cta:hover { background: #2C323E; }
+
+/* ── 屏 B：左列表 + 右详情（同一容器规格）────────────────────────────── */
+.giou-b { flex: 1; min-height: 0; display: flex; }
+.giou-blist { width: 320px; flex: none; border-right: 1px solid var(--gi-line); display: flex; flex-direction: column; min-height: 0; background: var(--gi-card); }
+.giou-filters { display: flex; gap: var(--gi-s2); padding: var(--gi-s3); border-bottom: 1px solid var(--gi-line); }
+.giou-filters button { min-height: 44px; padding: 0 var(--gi-s4); border: 0; border-radius: var(--gi-r-pill); background: #F1F2F5; color: var(--gi-ink-2); font: inherit; font-size: var(--gi-fs-body); cursor: pointer; transition-property: background-color, color, scale; transition-duration: 150ms; transition-timing-function: var(--gi-ease); }
+.giou-filters button:hover:not([data-on="1"]) { background: #E7EAF0; color: var(--gi-ink); }
+.giou-filters button:active { scale: .96; }
+.giou-filters button:focus-visible { outline: 2px solid var(--gi-accent); outline-offset: 2px; }
+.giou-filters button[data-on="1"] { background: var(--gi-dark); color: #fff; }
+.giou-list { flex: 1; min-height: 0; overflow-y: auto; padding: var(--gi-s3); display: flex; flex-direction: column; gap: var(--gi-s2); }
+.giou-item { display: flex; gap: var(--gi-s3); width: 100%; padding: var(--gi-s2); border: 0; border-radius: var(--gi-r-card); background: var(--gi-card); box-shadow: 0 0 0 1px var(--gi-line); color: inherit; text-align: left; font: inherit; cursor: pointer; transition-property: box-shadow, background-color, scale; transition-duration: 160ms; transition-timing-function: var(--gi-ease); }
+.giou-item:hover { box-shadow: 0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.giou-item:active { scale: .96; }
+.giou-item:focus-visible { outline: 2px solid var(--gi-accent); outline-offset: 2px; }
+.giou-item[data-on="1"] { box-shadow: 0 0 0 2px var(--gi-accent), var(--gi-shadow-card); }
+.giou-item[data-overdue="1"] { background: var(--gi-warn-bg); box-shadow: 0 0 0 1px #F0C79A; }
+.giou-item[data-overdue="1"][data-on="1"] { box-shadow: 0 0 0 2px var(--gi-accent), var(--gi-shadow-card); }
+.giou-thumb { width: 56px; height: 56px; flex: none; border-radius: var(--gi-r-ctl); object-fit: cover; background: #E4E7ED; outline: 1px solid rgba(0,0,0,.1); outline-offset: -1px; }
+.giou-thumb-ph { width: 56px; height: 56px; flex: none; border-radius: var(--gi-r-ctl); background: #F1F2F5; color: var(--gi-ink-3); font-size: var(--gi-fs-aux); display: flex; align-items: center; justify-content: center; text-align: center; }
+.giou-item-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--gi-s1); }
+.giou-item-id { font-size: var(--gi-fs-body); font-weight: 600; }
+.giou-item-meta { font-size: var(--gi-fs-aux); color: var(--gi-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.giou-item-chips { display: flex; gap: var(--gi-s1); flex-wrap: wrap; }
+.giou-bdetail { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: var(--gi-s4); display: flex; flex-direction: column; gap: var(--gi-s3); background: var(--gi-bg); }
+.giou-h2 { font-size: var(--gi-fs-body); font-weight: 600; display: flex; align-items: center; gap: var(--gi-s2); flex-wrap: wrap; }
+.giou-quote { border-left: 3px solid var(--gi-line); padding: var(--gi-s1) var(--gi-s3); color: var(--gi-ink-2); font-size: var(--gi-fs-body); text-wrap: pretty; }
+.giou-statusrow { display: flex; align-items: center; gap: var(--gi-s3); flex-wrap: wrap; font-size: var(--gi-fs-aux); color: var(--gi-ink-3); }
+.giou-stats { font-size: var(--gi-fs-aux); color: var(--gi-ink-2); white-space: nowrap; }
+.giou-stats .bad { color: var(--gi-warn-ink); }
+.giou-line { border-radius: var(--gi-r-block); padding: var(--gi-s2) var(--gi-s3); font-size: var(--gi-fs-aux); color: var(--gi-ink-2); background: #F1F2F5; }
+.giou-line.warn { background: var(--gi-warn-bg); color: var(--gi-warn-ink); }
+.giou-line.err { background: #FDECEC; color: #A32222; }
+.giou-line.ok { background: #EAF3EC; color: #24603A; }
+.giou-field { display: grid; grid-template-columns: 64px 1fr; gap: var(--gi-s1) var(--gi-s3); font-size: var(--gi-fs-body); }
+.giou-field .k { color: var(--gi-ink-3); font-size: var(--gi-fs-aux); padding-top: 0; }
+.giou-field .v { word-break: break-word; text-wrap: pretty; }
+.giou-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 0 var(--gi-s2); border-radius: var(--gi-r-pill); font-size: var(--gi-fs-aux); background: #F1F2F5; color: var(--gi-ink-2); white-space: nowrap; }
+.giou-chip[data-tone="overdue"], .giou-chip[data-tone="escalated"] { background: var(--gi-warn-bg); color: var(--gi-warn-ink); }
+.giou-chip[data-tone="pending_rectify"], .giou-chip[data-tone="pending"] { background: #EEF2FF; color: #2A3EA8; }
+.giou-chip[data-tone="rectified"], .giou-chip[data-tone="approved"] { background: #EAF3EC; color: #24603A; }
+.giou-chip[data-tone="high"] { background: #EAF3EC; color: #24603A; }
+.giou-chip[data-tone="mid"] { background: var(--gi-warn-bg); color: var(--gi-warn-ink); }
+.giou-chip[data-tone="low"] { background: #FDECEC; color: #A32222; }
+
+/* 「为什么查这几项」＝屏 B 视觉主角 */
+.giou-why { border-radius: var(--gi-r-block); background: var(--gi-card); box-shadow: 0 0 0 1px var(--gi-line); padding: var(--gi-s4); display: flex; flex-direction: column; gap: var(--gi-s2); border-left: 4px solid var(--gi-accent); }
+.giou-why .h { font-size: var(--gi-fs-title); font-weight: 600; }
+.giou-why .r { font-size: var(--gi-fs-body); color: var(--gi-ink); white-space: pre-wrap; text-wrap: pretty; }
+
+.giou-card { border-radius: var(--gi-r-card); background: var(--gi-card); box-shadow: var(--gi-shadow-card); padding: var(--gi-s2); display: flex; flex-direction: column; gap: var(--gi-s2); }
+/* 同心：卡片 18 / 内边距 8 ⇒ 卡内每个带圆角的内块一律 10（18 = 10 + 8）。 */
+.giou-card .giou-line, .giou-card .giou-shot { border-radius: var(--gi-r-ctl); }
+.giou-card .head { display: flex; align-items: center; gap: var(--gi-s2); flex-wrap: wrap; padding: 0; }
+.giou-card .nm { font-size: var(--gi-fs-body); font-weight: 600; }
+.giou-photos { display: flex; align-items: flex-start; gap: var(--gi-s3); flex-wrap: wrap; padding: 0; }
+.giou-shot { position: relative; border-radius: var(--gi-r-block); overflow: hidden; background: var(--gi-dark); max-width: 100%; }
+.giou-shot img { display: block; max-width: 100%; max-height: 340px; outline: 1px solid rgba(0,0,0,.1); outline-offset: -1px; }
+.giou-mark { position: absolute; width: 12px; height: 12px; margin: 0; transform: translate(-50%, -50%); border-radius: var(--gi-r-pill); background: #FF3B30; box-shadow: 0 0 0 2px rgba(255,255,255,.9); pointer-events: none; }
+.giou-frame { position: absolute; border: 2px solid #FF3B30; border-radius: var(--gi-r-ctl); box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); pointer-events: none; }
+.giou-basis { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: var(--gi-s2); }
+.giou-timeline { display: flex; flex-direction: column; gap: var(--gi-s2); border-left: 2px solid var(--gi-line); padding-left: var(--gi-s3); margin-left: var(--gi-s1); font-size: var(--gi-fs-aux); color: var(--gi-ink-2); }
+.giou-timeline b { color: var(--gi-ink); }
+.giou-actions { display: flex; align-items: center; gap: var(--gi-s2); flex-wrap: wrap; padding: 0; }
+
+/* ── 三态（加载中 / 空 / 失败）──────────────────────────────────────── */
+.giou-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--gi-s2); padding: var(--gi-s8) var(--gi-s4); text-align: center; color: var(--gi-ink-2); font-size: var(--gi-fs-body); }
+.giou-state .t { font-weight: 600; color: var(--gi-ink); }
+.giou-state .d { font-size: var(--gi-fs-aux); color: var(--gi-ink-3); max-width: 44ch; text-wrap: pretty; }
+/* 骨架屏必须给宽度：父级 .giou-state 是 align-items:center，只给 height 会横向塌成 0 → 加载态看起来是白屏。 */
+.giou-skel { width: 100%; align-self: stretch; height: 72px; border-radius: var(--gi-r-card); background: linear-gradient(90deg, rgba(16,19,25,.05), rgba(16,19,25,.10), rgba(16,19,25,.05)); background-size: 200% 100%; animation: giou-skel 1200ms ease-out infinite; }
+@keyframes giou-skel { from { background-position: 200% 0; } to { background-position: 0 0; } }
+
+/* ── 日志表（同一容器规格）──────────────────────────────────────────── */
+.giou-logs { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--gi-s3); padding: var(--gi-s4); }
+.giou-logbar { display: flex; align-items: center; gap: var(--gi-s2); flex-wrap: wrap; }
+.giou-tablewrap { flex: 1; min-height: 0; overflow: auto; background: var(--gi-card); border-radius: var(--gi-r-card); box-shadow: var(--gi-shadow-card); }
+.giou-table { width: 100%; border-collapse: collapse; font-size: var(--gi-fs-body); }
+.giou-table th { position: sticky; top: 0; z-index: 1; text-align: left; color: var(--gi-ink-3); font-weight: 600; font-size: var(--gi-fs-aux); background: var(--gi-card); border-bottom: 1px solid var(--gi-line); padding: var(--gi-s2) var(--gi-s3); white-space: nowrap; }
+.giou-table td { border-bottom: 1px solid var(--gi-line); padding: var(--gi-s3); vertical-align: top; word-break: break-word; }
+.giou-table tr[data-bad="1"] td { color: var(--gi-warn-ink); }
+.giou-table .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.giou-mask-note { font-size: var(--gi-fs-aux); color: var(--gi-ink-3); text-wrap: pretty; }
+
+/* ── 挂载点上的小入口（输入区 / 会话 header）──────────────────────────── */
+.giou-dockbtn { display: inline-flex; align-items: center; gap: var(--gi-s2); min-height: 44px; padding: 0 var(--gi-s4); border: 0; border-radius: var(--gi-r-ctl); background: var(--gi-card); color: var(--gi-ink); box-shadow: 0 0 0 1px var(--gi-line); font: inherit; font-size: var(--gi-fs-body); cursor: pointer; transition-property: background-color, box-shadow, scale; transition-duration: 160ms; transition-timing-function: var(--gi-ease); }
+.giou-dockbtn:hover { background: #F7F8FA; box-shadow: 0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.giou-dockbtn:active { scale: .96; }
+.giou-dockbtn:focus-visible { outline: 2px solid var(--gi-accent); outline-offset: 2px; }
+
+/* ── 追加（实施契约 §4 允许：清单里缺失的类，只新增、不改已有规则与令牌）──────
+   值仍取 §3.1/§3.2 的令牌与口径：圆角 10、间距 4/8/12/16/24、间距只用 8 的倍数、
+   控件四态齐全（hover / active / focus-visible / disabled，禁用态一律灰化）、
+   transition 写全属性名且 150–200ms ease-out。 */
+.giou-select {
+  min-height: 44px; padding: 0 var(--gi-s3);
+  border: 0; border-radius: var(--gi-r-ctl);
+  background: var(--gi-card); color: var(--gi-ink);
+  box-shadow: 0 0 0 1px var(--gi-line);
+  font: inherit; font-size: var(--gi-fs-body); cursor: pointer;
+  transition-property: background-color, box-shadow; transition-duration: 160ms; transition-timing-function: var(--gi-ease);
+}
+.giou-select:hover:not([disabled]) { background: #F7F8FA; box-shadow: 0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.giou-select:active:not([disabled]) { scale: .96; }
+.giou-select:focus-visible { outline: 2px solid var(--gi-accent); outline-offset: 2px; }
+.giou-select[disabled] { background: #F1F2F5; color: #A9AFBA; box-shadow: 0 0 0 1px #E4E7ED; cursor: not-allowed; }
+
+/* ══ 第二轮重做（2026-10-03）：整窗外壳 + 视觉重排 ══════════════════════════
+   三条用户反馈：① 界面只是嵌在 DSH 里的一个入口 → 改成 shell.overlay 上的**整窗表层**；
+   ② 看板/采集全 404 → 后端已修，界面要有真内容可看；③ 太空、太灰、太素 → 重排视觉。
+   本节只新增令牌与覆盖规则，不改上面任何一个令牌的值。 */
+:root {
+  /* 左导航（应用自己的 chrome）：深底 + 三级文字，用来把「这是应用、不是对话」一眼说清 */
+  --gi-nav: #161A20;
+  --gi-nav-2: #1E232B;
+  --gi-nav-ink: #C9CFD9;
+  --gi-nav-ink-3: #7E8796;
+  --gi-nav-hover: rgba(255,255,255,.07);
+  --gi-nav-on: rgba(255,255,255,.13);
+  --gi-navline: rgba(255,255,255,.09);
+}
+
+/* ── 整窗表层：铺满宿主给的表层容器（.overlayLayer = absolute/inset:0/z-index:20）── */
+.giou-root[data-surface="window"] {
+  position: absolute; inset: 0; z-index: 1;
+  pointer-events: auto; /* 表层本身 click-through，条目要自己opt-in指针事件 */
+  background: var(--gi-bg);
+}
+.giou-root[data-surface="panel"] { position: relative; }
+
+/* 顶部拖拽带：Windows 下宿主用 padding-top 给标题栏让位，本表层盖住了它，得把拖拽区补回来 */
+.giou-titlebar {
+  flex: none; height: var(--dsh-windows-titlebar-height, 0px);
+  background: var(--gi-nav); -webkit-app-region: drag;
+}
+.giou-appbody { flex: 1; min-height: 0; display: flex; }
+
+/* ── 左导航：品牌 + 角色视图切换 + 日志 + 底部动作 ─────────────────────── */
+.giou-nav {
+  flex: none; width: 236px; display: flex; flex-direction: column; gap: var(--gi-s6);
+  padding: var(--gi-s6) var(--gi-s3) var(--gi-s4);
+  background: var(--gi-nav); color: var(--gi-nav-ink);
+}
+.giou-navbrand { display: flex; align-items: center; gap: var(--gi-s3); padding: 0 var(--gi-s2); }
+.giou-navmark {
+  flex: none; width: 32px; height: 32px; border-radius: var(--gi-r-ctl);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--gi-accent); color: #fff; font-size: var(--gi-fs-body); font-weight: 600;
+}
+.giou-navname { min-width: 0; display: flex; flex-direction: column; }
+.giou-navtitle { font-size: var(--gi-fs-body); font-weight: 600; color: #fff; }
+.giou-navsub { font-size: var(--gi-fs-aux); color: var(--gi-nav-ink-3); }
+.giou-navgroup { display: flex; flex-direction: column; gap: var(--gi-s1); }
+.giou-navlabel { padding: 0 var(--gi-s2); font-size: var(--gi-fs-aux); color: var(--gi-nav-ink-3); }
+.giou-navbtn {
+  display: flex; align-items: center; gap: var(--gi-s3); width: 100%; min-height: 44px;
+  padding: 0 var(--gi-s3); border: 0; border-radius: var(--gi-r-ctl);
+  background: transparent; color: var(--gi-nav-ink);
+  font: inherit; font-size: var(--gi-fs-body); text-align: left; cursor: pointer;
+  transition-property: background-color, color, scale; transition-duration: 160ms; transition-timing-function: var(--gi-ease);
+}
+.giou-navbtn:hover:not([data-on="1"]) { background: var(--gi-nav-hover); color: #fff; }
+.giou-navbtn:active { scale: .96; }
+.giou-navbtn:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.giou-navbtn[data-on="1"] { background: var(--gi-nav-on); color: #fff; }
+.giou-navdot { flex: none; width: 6px; height: 6px; border-radius: var(--gi-r-pill); background: var(--gi-accent); opacity: 0; }
+.giou-navbtn[data-on="1"] .giou-navdot { opacity: 1; }
+.giou-navfoot { display: flex; flex-direction: column; gap: var(--gi-s2); border-top: 1px solid var(--gi-navline); padding-top: var(--gi-s4); }
+.giou-navcta {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--gi-s2);
+  min-height: 44px; padding: 0 var(--gi-s4); border: 0; border-radius: var(--gi-r-ctl);
+  background: var(--gi-accent); color: #fff; font: inherit; font-size: var(--gi-fs-body); font-weight: 600;
+  cursor: pointer; box-shadow: var(--gi-shadow-card);
+  transition-property: background-color, box-shadow, scale; transition-duration: 160ms; transition-timing-function: var(--gi-ease);
+}
+.giou-navcta:hover:not([disabled]) { background: #1A46C2; }
+.giou-navcta:active:not([disabled]) { scale: .96; }
+.giou-navcta:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.giou-navcta[disabled] { background: var(--gi-nav-2); color: var(--gi-nav-ink-3); box-shadow: none; cursor: not-allowed; }
+.giou-navbtn.ghost { color: var(--gi-nav-ink-3); justify-content: flex-start; }
+.giou-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+/* ── 主区顶栏：标题/副标题 + 右端统计与动作（白底，和灰底正文分层）───────── */
+.giou-root .giou-top {
+  flex: none; padding: var(--gi-s4) var(--gi-s6); gap: var(--gi-s4);
+  background: var(--gi-card); border-bottom: 1px solid var(--gi-line);
+}
+.giou-root .giou-title { font-size: var(--gi-fs-title); }
+.giou-topright { display: flex; align-items: center; gap: var(--gi-s3); }
+.giou-notices { flex: none; display: flex; flex-direction: column; gap: var(--gi-s2); padding: var(--gi-s3) var(--gi-s6) 0; }
+
+/* 统计三枚：保留原 chip 逐字文本，只把皮换成整块的数字块 */
+.giou-root .giou-statusrow { gap: var(--gi-s3); padding: 0; }
+.giou-statusrow .giou-chip {
+  min-height: 44px; padding: 0 var(--gi-s4); border-radius: var(--gi-r-block);
+  background: #F4F6F9; color: var(--gi-ink-2); font-size: var(--gi-fs-body); font-weight: 600;
+}
+.giou-statusrow .giou-chip[data-tone="overdue"] { background: var(--gi-warn-bg); color: var(--gi-warn-ink); }
+
+/* ── 首屏：角色选择（整屏铺开，两卡更饱满）────────────────────────────── */
+.giou-root .giou-roles {
+  max-width: 1040px; gap: var(--gi-s8); padding: var(--gi-s10) var(--gi-s8); align-content: center;
+}
+.giou-role-depth { display: flex; flex-direction: column; gap: var(--gi-s3); padding: var(--gi-s6) var(--gi-s6) 0; }
+.giou-role-body { padding: 0 var(--gi-s6) var(--gi-s4); gap: var(--gi-s3); }
+.giou-role-eyebrow { font-size: var(--gi-fs-aux); color: var(--gi-ink-3); letter-spacing: .08em; text-transform: uppercase; }
+.giou-role.supervisor .giou-role-eyebrow { color: var(--gi-nav-ink-3); }
+.giou-role-name { font-size: var(--gi-fs-title); }
+.giou-role-cta { min-height: 48px; font-weight: 600; }
+
+/* ── 屏 B：列表列更松、详情区更满（消灭大块灰白空场）─────────────────── */
+.giou-b { gap: 0; }
+.giou-blist { width: 348px; background: #F7F8FA; }
+.giou-root .giou-filters { padding: var(--gi-s3); gap: var(--gi-s2); background: var(--gi-card); }
+.giou-list { padding: var(--gi-s3); gap: var(--gi-s2); }
+.giou-item { padding: var(--gi-s3); border-radius: var(--gi-r-block); }
+.giou-thumb, .giou-thumb-ph { width: 64px; height: 64px; }
+.giou-bdetail { padding: var(--gi-s6); gap: var(--gi-s4); }
+.giou-card { padding: var(--gi-s3); }
+.giou-why { padding: var(--gi-s6); gap: var(--gi-s3); border-left-width: 4px; border-radius: var(--gi-r-card); }
+.giou-why .r { font-size: var(--gi-fs-body); line-height: 1.7; }
+.giou-h2 { gap: var(--gi-s3); }
+
+/* ── 三态：撑满可用高度，别缩成中间一小块 ─────────────────────────────── */
+.giou-root .giou-content > .giou-state, .giou-bdetail > .giou-state { flex: 1; min-height: 320px; }
+.giou-state .t { font-size: var(--gi-fs-body); }
+.giou-skel { height: 96px; }
+
+/* ── 日志：表头与行距更清楚 ───────────────────────────────────────────── */
+.giou-logs { padding: var(--gi-s6); gap: var(--gi-s4); }
+.giou-table td { padding: var(--gi-s3) var(--gi-s4); }
+/* 空/失败态吃掉剩余高度：日志面板是整窗的一屏，别把「暂无调用记录」挤在顶上留半屏空白 */
+.giou-logs > .giou-state { flex: 1; min-height: 0; }
+/* 「已退回·待整改」用危险色族（和逾期/告警同一套语义色，见 §11.15） */
+.giou-chip[data-tone="returned"] { background: #FDECEC; color: #A32222; }
 `
 
     // ── 纯工具 ──────────────────────────────────────────────────────────────
@@ -223,6 +516,22 @@ window.__ModuleLoader__.load({
       if (item && item.escalated) return 'escalated'
       if (item && item.overdue) return 'overdue'
       return key || 'unknown'
+    }
+
+    /**
+     * 状态 chip 组：状态本身 + 逾期/已升级两枚附加标记。
+     * **去重**：状态已经是「逾期」时不再并排一枚一模一样的「逾期」（真机截图里出现过「逾期 逾期」）。
+     */
+    function statusChipsOf(item) {
+      const base = statusLabelOf(item && item.status)
+      const out = [{ label: base, tone: statusToneOf(item) }]
+      if (item && item.overdue && base !== '逾期') out.push({ label: '逾期', tone: 'overdue' })
+      if (item && item.escalated && base !== '已升级') out.push({ label: '已升级', tone: 'escalated' })
+      return out
+    }
+    /** 把 chip 组渲染成 span 列表（列表项 / 详情头 / 判断卡共用一套口径）。 */
+    function renderStatusChips(item) {
+      return statusChipsOf(item).map((chip, index) => React.createElement('span', { className: 'giou-chip', key: 'chip' + index, 'data-tone': chip.tone }, chip.label))
     }
 
     /** 短编号：`INS-20261002-201530-ab12` → `#ab12`。 */
@@ -372,6 +681,9 @@ window.__ModuleLoader__.load({
         suggestion: textOf(raw.suggestion),
         dueAt: raw.dueAt === undefined ? null : raw.dueAt,
         status: textOf(raw.status) || 'unknown',
+        // 退回闭环：这条判断被退回过的痕迹（店长端整改要看的、督导端要能追溯的）
+        rejectedAt: raw.rejectedAt === undefined ? null : raw.rejectedAt,
+        rejectedReason: textOf(raw.rejectedReason),
         boxesCount: Array.isArray(raw.boxes) ? raw.boxes.length : 0,
         thumbUrl: photoUrlOf(raw.thumbUrl || raw.thumbPath),
         originalUrl: photoUrlOf(raw.originalUrl || raw.originalPath),
@@ -400,6 +712,14 @@ window.__ModuleLoader__.load({
         items: Array.isArray(raw.items) ? raw.items : [],
         reasons: textOf(raw.reasons),
         unreadable: Array.isArray(raw.unreadable) ? raw.unreadable : [],
+        // 真实模型调用次数（后端按 inspectionId 统计）。早先前端把它写死成「有判断就是 1 次」，
+        // 而一次提交实际是 checklist_generate + vision_judge **两次**调用 —— 这个数字被教练级别的人一眼抓到。
+        modelCallCount: Number.isFinite(Number(raw.modelCallCount)) ? Math.max(0, Number(raw.modelCallCount)) : 0,
+        // 退回闭环（后端快照新增字段）：被退回时间/次数、整改回拍来源、最近一条人工动作
+        returnedAt: raw.returnedAt === undefined ? null : raw.returnedAt,
+        returnedCount: Number.isFinite(Number(raw.returnedCount)) ? Math.max(0, Number(raw.returnedCount)) : 0,
+        reworkOf: textOf(raw.reworkOf),
+        lastAction: raw.lastAction && typeof raw.lastAction === 'object' ? raw.lastAction : null,
         findings,
         actions: Array.isArray(raw.actions) ? raw.actions.filter((item) => item && typeof item === 'object') : [],
       }
@@ -834,16 +1154,17 @@ window.__ModuleLoader__.load({
 
     // ── 面板开关（督导端主入口）────────────────────────────────────────────
     const panelState = {
-      open: false,
+      // 首屏纪律（指令 §3）：每次启动都落在角色选择；选定后本次运行内保持（§5.4 关闭再开状态可复现）。
+      entered: false,
       view: 'board', // board | logs
-      snapshot: { open: false, view: 'board' },
+      snapshot: { entered: false, view: 'board' },
       listeners: new Set(),
       subscribe(listener) {
         panelState.listeners.add(listener)
         return () => panelState.listeners.delete(listener)
       },
       notify() {
-        panelState.snapshot = { open: panelState.open, view: panelState.view }
+        panelState.snapshot = { entered: panelState.entered, view: panelState.view }
         panelState.listeners.forEach((listener) => {
           try {
             listener()
@@ -852,19 +1173,13 @@ window.__ModuleLoader__.load({
           }
         })
       },
-      setOpen(next, view) {
-        const value = next === true
-        if (view) panelState.view = view === 'logs' ? 'logs' : 'board'
-        if (panelState.open === value) {
-          panelState.notify()
-          return
-        }
-        panelState.open = value
-        panelState.notify()
-        if (value) {
-          pullSnapshot()
+      setEntered(next) {
+        panelState.entered = next === true
+        if (panelState.entered) {
           if (panelState.view === 'logs') pullLogs()
+          else pullSnapshot()
         }
+        panelState.notify()
       },
       setView(view) {
         panelState.view = view === 'logs' ? 'logs' : 'board'
@@ -899,10 +1214,17 @@ window.__ModuleLoader__.load({
       },
     }
 
+    /**
+     * 「进入本包面板」的挂载期钩子：由 apply() 在 main 注册后赋值。
+     * 面板机制下「打开」= 进入面板 + 把主区域切到本 key（不是旧的浮层开关——旧写法点完没有任何可见变化）。
+     */
+    let enterMainPanel = () => false
+    let leaveMainPanel = () => false
+
     function exposeChannels() {
       globalThis.__gaia_inspection_oversight__ = {
-        openPanel: (view) => panelState.setOpen(true, view),
-        closePanel: () => panelState.setOpen(false),
+        openPanel: (view) => enterMainPanel(view === 'logs' ? 'logs' : view === 'board' ? 'board' : undefined),
+        closePanel: () => leaveMainPanel(),
         runScan: () => runScan(),
         refresh: () => pullSnapshot(),
         scanState,
@@ -912,7 +1234,9 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // ── 组件：日志表（独立面板/独立 tab 共用）───────────────────────────────
+    // ── 组件：日志表（外壳的日志视图 / 右侧栏独立 tab 共用；同一容器规格）────
+    // 契约 §3.4-1：容器 `.giou-logs`（含 `.giou-logbar` + `.giou-tablewrap` + `.giou-table`），
+    // 7 列逐字、空态逐字「暂无调用记录」、脱敏说明逐字、失败调用 responseSummary=null 不误报，三态齐全。
     function LogsView() {
       const source = React.useSyncExternalStore(logsSource.subscribe, () => logsSource.snapshot, () => logsSource.snapshot)
       const [storeFilter, setStoreFilter] = React.useState('')
@@ -938,64 +1262,91 @@ window.__ModuleLoader__.load({
         if (statusFilter && call.status !== statusFilter) return false
         return true
       })
+      const statuses = Array.from(new Set(calls.map((call) => call.status).filter(Boolean)))
 
-      const children = []
-
-      children.push(
+      // 过滤条：计数改成独立 chip（不拼 `·` 元数据串）。
+      const bar = React.createElement('div', { className: 'giou-logbar', key: 'bar' }, [
+        React.createElement('span', { className: 'giou-h2', key: 'title' }, CAPABILITY_LOGS),
+        React.createElement('button', { className: 'giou-btn', type: 'button', key: 'refresh', onClick: () => pullLogs() }, '刷新'),
         React.createElement(
-          'div',
-          { className: 'giou-statusrow', key: 'toolbar', style: { gap: '6px' } },
-          React.createElement('span', { className: 'giou-title' }, CAPABILITY_LOGS),
-          React.createElement('button', { className: 'giou-btn primary', type: 'button', onClick: () => pullLogs() }, '刷新'),
-          React.createElement(
-            'button',
-            { className: 'giou-btn', type: 'button', onClick: () => { logsSource.auto = !logsSource.auto; logsSource.notify() } },
-            (source.auto ? '✓ ' : '') + '每 5 秒自动刷新',
-          ),
-          React.createElement(
-            'select',
-            { className: 'giou-btn', value: storeFilter, onChange: (event) => setStoreFilter(event && event.target ? event.target.value : '') },
-            [React.createElement('option', { key: '__all', value: '' }, '全部门店'), ...stores.map((id) => React.createElement('option', { key: id, value: id }, id))],
-          ),
-          React.createElement(
-            'select',
-            { className: 'giou-btn', value: statusFilter, onChange: (event) => setStatusFilter(event && event.target ? event.target.value : '') },
-            [
-              React.createElement('option', { key: '__all_st', value: '' }, '全部状态'),
-              ...Array.from(new Set(calls.map((call) => call.status).filter(Boolean))).map((status) => React.createElement('option', { key: status, value: status }, status)),
-            ],
-          ),
-          React.createElement('span', null, '本机 ' + String(data ? data.count : '—') + ' 条 · 显示 ' + String(visible.length) + ' 条'),
+          'button',
+          { className: 'giou-btn', type: 'button', key: 'auto', 'data-on': source.auto ? '1' : '0', onClick: () => { logsSource.auto = !logsSource.auto; logsSource.notify() } },
+          (source.auto ? '✓ ' : '') + '每 5 秒自动刷新',
         ),
-      )
+        React.createElement(
+          'select',
+          { className: 'giou-select', key: 'store', value: storeFilter, 'aria-label': '按门店筛选', onChange: (event) => setStoreFilter(event && event.target ? event.target.value : '') },
+          [React.createElement('option', { key: '__all', value: '' }, '全部门店'), ...stores.map((id) => React.createElement('option', { key: id, value: id }, id))],
+        ),
+        React.createElement(
+          'select',
+          { className: 'giou-select', key: 'status', value: statusFilter, 'aria-label': '按状态筛选', onChange: (event) => setStatusFilter(event && event.target ? event.target.value : '') },
+          [React.createElement('option', { key: '__all_st', value: '' }, '全部状态'), ...statuses.map((status) => React.createElement('option', { key: status, value: status }, status))],
+        ),
+        React.createElement('span', { className: 'giou-chip giou-num', key: 'total' }, '本机 ' + String(data ? data.count : '—') + ' 条'),
+        React.createElement('span', { className: 'giou-chip giou-num', key: 'shown' }, '显示 ' + String(visible.length) + ' 条'),
+      ])
+
+      const children = [bar]
+
+      // 三态 ① 加载中 / ③ 失败+重试（失败时读不到任何记录，不留白屏）。
+      if (!data) {
+        children.push(
+          source.failure
+            ? React.createElement(DataState, {
+                key: 'fail',
+                kind: 'fail',
+                title: '模型调用记录不可用',
+                detail: source.failure + '；装好 gaia-inspection-core 后，这里会逐条列出模型调用记录。',
+                actionLabel: '重试',
+                onAction: () => pullLogs(),
+              })
+            : React.createElement(DataState, { key: 'loading', kind: 'loading', title: '正在读取模型调用记录…' }),
+        )
+        return React.createElement('div', { className: 'giou-logs' }, children)
+      }
 
       if (source.failure) {
         children.push(
           React.createElement(
             'div',
-            { className: 'giou-line warn', key: 'fail' },
-            data && source.lastOkAt ? '调用日志不可用 · 上次成功 ' + source.lastOkAt + '（显示的是上次成功的数据）' : '调用日志不可用 · ' + source.failure + '（尚无成功数据）',
+            { className: 'giou-line warn', key: 'stale' },
+            source.lastOkAt
+              ? '调用日志不可用（上次成功 ' + source.lastOkAt + '）：下面显示的是上次成功的数据。'
+              : '调用日志不可用（尚无成功数据）：' + source.failure,
           ),
         )
       }
 
-      if (!data) {
+      // 三态 ② 空（居中提示 + 下一步动作按钮）。
+      if (calls.length === 0) {
         children.push(
-          React.createElement('div', { className: 'giou-skel', key: 'skel-a' }),
-          React.createElement('div', { className: 'giou-skel', key: 'skel-b' }),
-          React.createElement('div', { className: 'giou-line', key: 'none' }, source.failure ? '后端未就绪：装好 gaia-inspection-core 后，这里会逐条列出模型调用记录。' : '正在读取模型调用记录…'),
+          React.createElement(DataState, {
+            key: 'empty',
+            kind: 'empty',
+            title: LOGS_EMPTY_TEXT,
+            detail: '还没有模型调用留痕：在店长端提交一次自查后，这里会逐条列出调用记录。',
+            actionLabel: '刷新',
+            onAction: () => pullLogs(),
+          }),
         )
-        return React.createElement('div', { className: 'giou-right', style: { flex: '1' } }, children)
-      }
-
-      if (visible.length === 0) {
-        children.push(React.createElement('div', { className: 'giou-empty', key: 'zero' }, calls.length === 0 ? LOGS_EMPTY_TEXT : '当前筛选条件下没有记录。'))
+      } else if (visible.length === 0) {
+        children.push(
+          React.createElement(DataState, {
+            key: 'filtered',
+            kind: 'empty',
+            title: '当前筛选条件下没有记录。',
+            detail: '清掉门店 / 状态筛选可看到全部 ' + String(calls.length) + ' 条。',
+            actionLabel: '清除筛选',
+            onAction: () => { setStoreFilter(''); setStatusFilter('') },
+          }),
+        )
       } else {
         const columns = ['时间', '模型', '提示词版本', '提交编号', '请求摘要', '响应摘要', '耗时']
         children.push(
           React.createElement(
             'div',
-            { key: 'table', style: { overflowX: 'auto' } },
+            { className: 'giou-tablewrap', key: 'tablewrap' },
             React.createElement(
               'table',
               { className: 'giou-table' },
@@ -1007,31 +1358,35 @@ window.__ModuleLoader__.load({
                   React.createElement(
                     'tr',
                     { key: call.callId || String(index), 'data-bad': call.status === 'failed' || call.status === 'error' ? '1' : '0' },
-                    React.createElement('td', { className: 'mono' }, clockOf(call.ts) || textOf(call.ts) || '—'),
+                    React.createElement('td', { className: 'mono giou-num' }, clockOf(call.ts) || textOf(call.ts) || '—'),
                     React.createElement('td', null, call.model || '—'),
                     React.createElement('td', null, call.hasPromptVersion ? call.promptVersion : call.kind ? call.kind + '（类型）' : '—'),
-                    React.createElement('td', { className: 'mono' }, call.inspectionId ? shortNo(call.inspectionId) : '—'),
+                    React.createElement('td', { className: 'mono giou-num' }, call.inspectionId ? shortNo(call.inspectionId) : '—'),
                     React.createElement('td', null, call.hasRequestSummary ? call.requestSummary : '—'),
                     React.createElement('td', null, call.hasResponseSummary ? call.responseSummary : '（本次无响应）'),
-                    React.createElement('td', null, latencyOf(call.latencyMs) + (call.status && call.status !== 'ok' ? '｜' + call.status + (call.errorCode ? ' ' + call.errorCode : '') : '')),
+                    React.createElement('td', { className: 'mono giou-num' }, latencyOf(call.latencyMs) + (call.status && call.status !== 'ok' ? '｜' + call.status + (call.errorCode ? ' ' + call.errorCode : '') : '')),
                   ),
                 ),
               ),
             ),
           ),
         )
+        // 失败调用本来就 responseSummary=null（不算「后端缺字段」），只对 status=ok 的空响应报警。
         const missing = visible.filter((call) => !call.hasPromptVersion || !call.hasRequestSummary || (!call.hasResponseSummary && call.status === 'ok')).length
         if (missing > 0) {
           children.push(React.createElement('div', { className: 'giou-line warn', key: 'missing' }, '有 ' + missing + ' 条' + LOGS_MISSING_TEXT))
         }
       }
 
-      children.push(React.createElement('div', { className: 'giou-line', key: 'note' }, LOGS_MASKING_TEXT))
+      children.push(React.createElement('div', { className: 'giou-mask-note', key: 'note' }, LOGS_MASKING_TEXT))
 
-      return React.createElement('div', { className: 'giou-right', style: { flex: '1' } }, children)
+      return React.createElement('div', { className: 'giou-logs' }, children)
     }
 
     // ── 组件：证据区（面板内放大区；有框画框、无框标点、都没有就不画）────────
+    // 契约 §3.4-2：改用 `.giou-photos/.giou-shot/.giou-mark/.giou-frame/.giou-basis/.giou-field/
+    // `.giou-card/.giou-chip/.giou-actions`；证据区标题用能力词「证据挂图卡片」（本区第一次可见时展示）；
+    // 三态齐全（骨架 / 无证据 / 接口失败+重试）。**绝不画空框**。
     function EvidenceArea({ finding, evidence }) {
       const [size, setSize] = React.useState(null)
       const data = evidence && evidence.phase === 'hit' ? evidence.data : null
@@ -1043,19 +1398,40 @@ window.__ModuleLoader__.load({
         setSize(null)
       }, [finding.findingId])
 
-      const children = []
+      const area = []
+
+      // 证据区标题＝能力词（本区第一次可见时就出现在标题位）。
+      area.push(React.createElement('div', { className: 'giou-h2', key: 'title' }, CAPABILITY_EVIDENCE))
 
       if (evidence && evidence.phase === 'loading') {
-        children.push(React.createElement('div', { className: 'giou-line', key: 'loading' }, '正在回查原图…'))
+        area.push(React.createElement(DataState, { key: 'loading', kind: 'loading', title: '正在回查原图…' }))
+        area.push(React.createElement('div', { className: 'giou-line', key: 'loading-hint' }, '正在回查原图…'))
       } else if (evidence && evidence.phase === 'error') {
-        children.push(React.createElement('div', { className: 'giou-line err', key: 'err' }, '证据接口不可用：' + evidence.error))
+        area.push(
+          React.createElement(DataState, {
+            key: 'err',
+            kind: 'fail',
+            title: '证据接口不可用',
+            detail: textOf(evidence.error) || '证据接口不可用',
+            actionLabel: '重试',
+            onAction: () => evidenceState.load(finding.findingId),
+          }),
+        )
       } else if (evidence && evidence.phase === 'miss') {
-        children.push(React.createElement('div', { className: 'giou-line warn', key: 'miss' }, (evidence.summary || '未找到该证据') + '（这条判断没有可回查的证据记录）'))
+        area.push(
+          React.createElement(DataState, {
+            key: 'miss',
+            kind: 'empty',
+            title: textOf(evidence.summary) || '未找到该证据',
+            detail: '这条判断没有可回查的证据记录。',
+            actionLabel: '重试',
+            onAction: () => evidenceState.load(finding.findingId),
+          }),
+        )
       }
 
-      if (url) {
-        children.push(
-          React.createElement(
+      const shot = url
+        ? React.createElement(
             'div',
             { className: 'giou-shot', key: 'shot' },
             React.createElement('img', {
@@ -1077,9 +1453,8 @@ window.__ModuleLoader__.load({
                 )
               : null,
             size && locate.boxes.length === 0 && locate.point ? React.createElement('span', { className: 'giou-mark', style: { left: locate.point.x * 100 + '%', top: locate.point.y * 100 + '%' }, title: '定位点（模型未给区域框）' }) : null,
-          ),
-        )
-      }
+          )
+        : null
 
       const basis = []
       if (data) {
@@ -1096,6 +1471,9 @@ window.__ModuleLoader__.load({
         } else {
           basis.push(React.createElement('div', { className: 'giou-line warn', key: 'pos' }, '模型确实无法定位（无区域框、也无定位点）：本次降级为「图上不标任何框或点、只写依据文字」——不画空框、不假装有框。'))
         }
+        if (Array.isArray(data.unreadable) && data.unreadable.length > 0) {
+          basis.push(React.createElement('div', { className: 'giou-line warn', key: 'unreadable' }, '看不清的照片 ' + data.unreadable.length + ' 张：未据此下结论（模型侧已标「看不清」）。'))
+        }
         basis.push(React.createElement('div', { className: 'giou-field', key: 'reason' }, React.createElement('span', { className: 'k' }, '依据'), React.createElement('span', { className: 'v' }, textOf(data.reason) || finding.reason || '（模型未给依据文字）')))
         basis.push(React.createElement('div', { className: 'giou-field', key: 'sugg' }, React.createElement('span', { className: 'k' }, '整改要求'), React.createElement('span', { className: 'v' }, textOf(data.suggestion) || finding.suggestion || '未标注')))
         basis.push(React.createElement('div', { className: 'giou-field', key: 'due' }, React.createElement('span', { className: 'k' }, '截止'), React.createElement('span', { className: 'v' }, dateTimeOf(data.dueAt || finding.dueAt) || '未标注')))
@@ -1103,11 +1481,15 @@ window.__ModuleLoader__.load({
         basis.push(React.createElement('div', { className: 'giou-line', key: 'pending' }, '点「回看原图」后在这里显示定位与依据。'))
       }
 
-      return React.createElement('div', { className: 'giou-photos' }, [children, React.createElement('div', { className: 'giou-basis', key: 'basis' }, basis)].flat())
+      area.push(React.createElement('div', { className: 'giou-photos', key: 'photos' }, [shot, React.createElement('div', { className: 'giou-basis', key: 'basis' }, basis)]))
+
+      return React.createElement('div', { className: 'giou-card', 'data-area': 'evidence' }, area)
     }
 
-    // ── 组件：检查项卡 ──────────────────────────────────────────────────────
-    function FindingCard({ finding, storeName, onAction, busyAction }) {
+    // ── 组件：检查项卡（结论 / 依据 / 置信度 / 整改要求与截止 / 动作行）────────
+    // 契约 §3.4-2：状态、置信度、逾期一律 `.giou-chip` + `data-tone`；逾期单独一枚 chip，
+    // 不再拼 `pending_rectify · 逾期` 这类元数据串。动作词逐字：通过 / 退回并说明 / 催办 / 确认退回 / 取消。
+    function FindingCard({ finding, storeName, onAction, busyAction, inspectionId }) {
       const [open, setOpen] = React.useState(false)
       const [note, setNote] = React.useState('')
       const [askReason, setAskReason] = React.useState(false)
@@ -1121,6 +1503,11 @@ window.__ModuleLoader__.load({
         if (next) evidenceState.load(finding.findingId)
       }
 
+      const field = (key, label, value) =>
+        React.createElement('div', { className: 'giou-field', key }, React.createElement('span', { className: 'k' }, label), React.createElement('span', { className: 'v' }, value))
+
+      const chips = renderStatusChips(finding)
+
       return React.createElement(
         'div',
         { className: 'giou-card' },
@@ -1128,25 +1515,29 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'head' },
           React.createElement('span', { className: 'nm' }, finding.itemName),
-          confidence.display
-            ? React.createElement('span', { className: 'giou-conf', 'data-level': confidence.level, title: confidenceNote }, '置信度 ' + confidence.label)
-            : React.createElement('span', { className: 'giou-conf', 'data-level': 'none', title: confidenceNote }, '置信度 未标注'),
-          React.createElement('span', { className: 'giou-badge', 'data-tone': statusToneOf(finding) }, statusLabelOf(finding.status) + (finding.overdue ? ' · 逾期' : '')),
+          React.createElement('span', { className: 'giou-chip', 'data-tone': confidence.level, title: confidenceNote }, '置信度 ' + confidence.label),
+          ...chips,
           React.createElement('span', { style: { flex: '1' } }),
           React.createElement('button', { className: 'giou-btn', type: 'button', onClick: toggle }, open ? '收起原图' : '回看原图'),
         ),
-        React.createElement('div', { className: 'giou-field' }, React.createElement('span', { className: 'k' }, '判断'), React.createElement('span', { className: 'v' }, textOf(finding.reason) || '（模型未给依据文字）')),
-        React.createElement('div', { className: 'giou-field' }, React.createElement('span', { className: 'k' }, '依据'), React.createElement('span', { className: 'v' }, textOf(finding.reason) || '（无）')),
-        React.createElement('div', { className: 'giou-field' }, React.createElement('span', { className: 'k' }, '整改'), React.createElement('span', { className: 'v' }, (textOf(finding.suggestion) || '未标注') + '｜截止 ' + (dateTimeOf(finding.dueAt) || '未标注') + (finding.overdue ? '（逾期自动升级）' : '）'))),
+        // 「判断」给结构化结论（项名 + 严重度），「依据」给模型原文——旧版两行都填 finding.reason，读起来是完全重复的两行。
+        field('judge', '判断', '判为「' + textOf(finding.itemName) + '」，严重度' + (textOf(finding.severity) || '未标注')),
+        field('basis', '依据', textOf(finding.reason) || '（模型未给依据文字）'),
+        field('suggestion', '整改要求', textOf(finding.suggestion) || '未标注'),
+        field('due', '截止', (dateTimeOf(finding.dueAt) || '未标注') + (finding.overdue ? '（逾期自动升级）' : '')),
         finding.boxesCount > 0
           ? React.createElement('div', { className: 'giou-line', key: 'boxes' }, '模型给了 ' + finding.boxesCount + ' 处区域框（点「回看原图」在图上框出）')
+          : null,
+        // 本项被退回过的痕迹：写清楚"退给谁、为什么、下一步"，店长端「待整改」里能看到同一条。
+        finding.rejectedAt
+          ? React.createElement('div', { className: 'giou-line err', key: 'rejected' }, '本项已退回（' + (clockOf(finding.rejectedAt) || '—') + '）：「' + (textOf(finding.rejectedReason) || '（后端未记录原因）') + '」　→ 店长端「待整改」可看到并整改回拍，新单会标「整改回拍自 ' + shortNo(inspectionId) + '」。')
           : null,
         open ? React.createElement(EvidenceArea, { finding, evidence }) : null,
         React.createElement(
           'div',
           { className: 'giou-actions' },
           React.createElement('button', { className: 'giou-btn', type: 'button', disabled: busyAction === 'approve', onClick: () => onAction({ type: 'approve', findingId: finding.findingId, reason: '' }) }, '通过'),
-          React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => setAskReason(!askReason) }, '退回并说明'),
+          React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => setAskReason(!askReason) }, finding.rejectedAt ? '重新退回并说明' : '退回并说明'),
           React.createElement('button', { className: 'giou-btn', type: 'button', disabled: busyAction === 'remind', onClick: () => onAction({ type: 'remind', findingId: finding.findingId, reason: '' }) }, '催办'),
         ),
         askReason
@@ -1156,7 +1547,7 @@ window.__ModuleLoader__.load({
               React.createElement('textarea', { className: 'giou-note', value: note, placeholder: '写一句退回原因（会写入这条提交的动作记录）', onChange: (event) => setNote(event && event.target ? event.target.value : '') }),
               React.createElement(
                 'div',
-                { className: 'giou-actions', style: { marginTop: '5px' } },
+                { className: 'giou-actions', style: { marginTop: '8px' } },
                 React.createElement('button', { className: 'giou-btn primary', type: 'button', disabled: busyAction === 'reject' || trim(note).length === 0, onClick: () => onAction({ type: 'reject', findingId: finding.findingId, reason: note }) }, '确认退回'),
                 React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => { setAskReason(false); setNote('') } }, '取消'),
               ),
@@ -1165,12 +1556,15 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // ── 组件：屏 B（左右两栏）──────────────────────────────────────────────
+    // ── 组件：屏 B（左右两栏：`.giou-blist` 列表 + `.giou-bdetail` 详情）───────
+    // 契约 §3.4-3：容器换 `.giou-b`；**删掉本组件自己那行 topbar**（统计行与 立即扫描/刷新/
+    // 模型调用日志/收起面板 现在都在 InspectionApp 顶部，重复即违反「同一容器规格」）；
+    // 列表补齐三态；列表项用 `.giou-thumb/.giou-item-id/.giou-item-meta/.giou-item-chips + .giou-chip`；
+    // 保留扫描回执 / 扫描失败两行。
     function BoardView() {
       const source = React.useSyncExternalStore(snapshotSource.subscribe, () => snapshotSource.snapshot, () => snapshotSource.snapshot)
       const scan = React.useSyncExternalStore(scanState.subscribe, () => scanState.snapshot, () => scanState.snapshot)
       const actions = React.useSyncExternalStore(actionState.subscribe, () => actionState.snapshot, () => actionState.snapshot)
-      const view = React.useSyncExternalStore(panelState.subscribe, () => panelState.snapshot, () => panelState.snapshot)
       const [filter, setFilter] = React.useState('pending')
       const [selectedId, setSelectedId] = React.useState('')
 
@@ -1183,7 +1577,6 @@ window.__ModuleLoader__.load({
       const data = source.data
       const list = sortByTimeDesc(data ? data.inspections : [])
       const visible = filterInspections(list, filter)
-      const stats = statsOf(data, Date.now())
       const selected = visible.find((item) => item.id === selectedId) || visible[0] || null
 
       const onAction = async (payload) => {
@@ -1192,9 +1585,7 @@ window.__ModuleLoader__.load({
         if (payload.type === 'approve' || payload.type === 'reject') pullSnapshot()
       }
 
-      const children = []
-
-      children.push(
+      const children = [
         React.createElement(
           'div',
           { className: 'giou-filters', key: 'filters' },
@@ -1202,11 +1593,36 @@ window.__ModuleLoader__.load({
             React.createElement('button', { key: item.key, type: 'button', 'data-on': filter === item.key ? '1' : '0', onClick: () => setFilter(item.key) }, item.label),
           ),
         ),
-      )
+      ]
 
-      if (!data && !source.failure) children.push(React.createElement('div', { className: 'giou-list', key: 'skel' }, [React.createElement('div', { className: 'giou-skel', key: 's1' }), React.createElement('div', { className: 'giou-skel', key: 's2' }), React.createElement('div', { className: 'giou-skel', key: 's3' })]))
-      else if (visible.length === 0) children.push(React.createElement('div', { className: 'giou-list', key: 'empty' }, React.createElement('div', { className: 'giou-empty' }, filter === 'overdue' ? '当前没有逾期条目。' : '当前没有待复核')))
-      else {
+      // 列表三态：加载中（骨架）/ 空（居中提示 + 下一步动作）/ 失败（原因 + 重试）。
+      if (!data && !source.failure) {
+        children.push(
+          React.createElement('div', { className: 'giou-list', key: 'loading' }, React.createElement(DataState, { kind: 'loading', title: '正在读取巡店数据…' })),
+        )
+      } else if (!data) {
+        children.push(
+          React.createElement(
+            'div',
+            { className: 'giou-list', key: 'fail' },
+            React.createElement(DataState, { kind: 'fail', title: '看板数据不可用', detail: source.failure, actionLabel: '重试', onAction: () => pullSnapshot() }),
+          ),
+        )
+      } else if (visible.length === 0) {
+        children.push(
+          React.createElement(
+            'div',
+            { className: 'giou-list', key: 'empty' },
+            React.createElement(DataState, {
+              kind: 'empty',
+              title: filter === 'overdue' ? '当前没有逾期条目。' : '当前没有待复核',
+              detail: '可以切到「全部」看历史提交，或在店长端提交一次新的自查。',
+              actionLabel: '看全部',
+              onAction: () => setFilter('all'),
+            }),
+          ),
+        )
+      } else {
         children.push(
           React.createElement(
             'div',
@@ -1223,15 +1639,19 @@ window.__ModuleLoader__.load({
                   onClick: () => setSelectedId(item.id),
                 },
                 item.findings[0] && item.findings[0].thumbUrl
-                  ? React.createElement('img', { src: item.findings[0].thumbUrl, alt: item.id, loading: 'lazy' })
-                  : React.createElement('span', { className: 'ph' }, '无缩略图'),
-                React.createElement(
-                  'span',
-                  { className: 'txt' },
-                  React.createElement('span', { className: 'id' }, shortNo(item.id) + ' · ' + statusLabelOf(item.status) + (item.overdue ? ' · 已升级' : '')),
-                  React.createElement('span', { className: 'meta' }, item.storeName + ' · ' + (clockOf(item.createdAt) || '时间未标注')),
-                  React.createElement('span', { className: 'meta' }, (item.note ? trim(item.note).slice(0, 26) : '（无门店原话）')),
-                ),
+                  ? React.createElement('img', { className: 'giou-thumb', key: 'thumb', src: item.findings[0].thumbUrl, alt: item.storeName, loading: 'lazy' })
+                  : React.createElement('span', { className: 'giou-thumb-ph', key: 'thumb-ph' }, '无缩略图'),
+                React.createElement('span', { className: 'giou-item-txt', key: 'txt' }, [
+                  React.createElement('span', { className: 'giou-item-id giou-num', key: 'id' }, shortNo(item.id)),
+                  React.createElement('span', { className: 'giou-item-meta', key: 'store' }, item.storeName),
+                  React.createElement('span', { className: 'giou-item-meta', key: 'time' }, clockOf(item.createdAt) || '时间未标注'),
+                  React.createElement('span', { className: 'giou-item-chips', key: 'chips' }, [
+                    ...renderStatusChips(item),
+                    // 列表里也要能一眼看出"这条被退回过"（用户实测反馈：退回后找不到痕迹）
+                    item.returnedAt ? React.createElement('span', { className: 'giou-chip', key: 'returned', 'data-tone': 'returned' }, '已退回') : null,
+                  ]),
+                  item.note ? React.createElement('span', { className: 'giou-item-meta', key: 'note' }, trim(item.note).slice(0, 26)) : null,
+                ]),
               ),
             ),
           ),
@@ -1240,20 +1660,38 @@ window.__ModuleLoader__.load({
 
       const detail = []
 
-      if (!selected) {
-        detail.push(
-          React.createElement('div', { className: 'giou-empty', key: 'nodetail' }, data ? '当前没有待复核：点左侧列表换筛选，或在店长端提交一次新的自查。' : source.failure ? '看板数据不可用：' + source.failure : '正在读取巡店数据…'),
-        )
-      } else {
-        const badgeFinding = selected.findings[0] || null
+      if (source.failure && data) {
         detail.push(
           React.createElement(
             'div',
-            { className: 'giou-h2', key: 'head' },
-            '提交 ' + shortNo(selected.id) + ' · ' + selected.storeName + (selected.storeType ? ' · ' + selected.storeType : ''),
-            React.createElement('span', { className: 'giou-badge', 'data-tone': statusToneOf(selected) }, statusLabelOf(selected.status) + (selected.overdue ? ' · 已升级' : '')),
-            selected.demo ? React.createElement('span', { className: 'giou-badge' }, '演示样例') : null,
+            { className: 'giou-line warn', key: 'stale' },
+            source.lastOkAt ? '看板数据不可用（上次成功 ' + source.lastOkAt + '）：下面显示的是上次成功的数据。' : '看板数据不可用（尚无成功数据）：' + source.failure,
           ),
+        )
+      }
+
+      if (!selected) {
+        // 三态按「有没有数据」+「有没有失败原因」分流：取数失败时详情区也必须给原因 + 重试，
+        // 不能只看 data 而停在骨架（§5.2 失败态＝原因 + 重试，不留白屏）。
+        detail.push(
+          data
+            ? React.createElement(DataState, { key: 'nodetail', kind: 'empty', title: '当前没有待复核', detail: '点左侧列表换筛选，或在店长端提交一次新的自查。', actionLabel: '看全部', onAction: () => setFilter('all') })
+            : source.failure
+              ? React.createElement(DataState, { key: 'nodetail-fail', kind: 'fail', title: '看板数据不可用', detail: source.failure, actionLabel: '重试', onAction: () => pullSnapshot() })
+              : React.createElement(DataState, { key: 'nodetail-loading', kind: 'loading', title: '正在读取巡店数据…' }),
+        )
+      } else {
+        detail.push(
+          React.createElement('div', { className: 'giou-h2', key: 'head' }, [
+            React.createElement('span', { className: 'giou-num', key: 'no' }, '提交 ' + shortNo(selected.id)),
+            React.createElement('span', { key: 'store' }, selected.storeName),
+            selected.storeType ? React.createElement('span', { className: 'giou-item-meta', key: 'type' }, selected.storeType) : null,
+            ...renderStatusChips(selected),
+            // 退回闭环：被退回过就显眼地标出来，是"整改回拍"来的就写明来源单
+            selected.returnedAt ? React.createElement('span', { className: 'giou-chip', key: 'returned', 'data-tone': 'returned' }, '已退回·待整改') : null,
+            selected.reworkOf ? React.createElement('span', { className: 'giou-chip', key: 'rework' }, '整改回拍自 ' + shortNo(selected.reworkOf)) : null,
+            selected.demo ? React.createElement('span', { className: 'giou-chip', key: 'demo' }, '演示样例') : null,
+          ]),
         )
         detail.push(React.createElement('div', { className: 'giou-quote', key: 'note' }, '门店原话：「' + (trim(selected.note) || '（无）') + '」'))
         detail.push(
@@ -1263,10 +1701,28 @@ window.__ModuleLoader__.load({
             React.createElement('span', null, '状态：' + statusLabelOf(selected.status)),
             React.createElement('span', null, '提交 ' + (clockOf(selected.createdAt) || '—')),
             React.createElement('span', null, '截止 ' + (dateTimeOf(selected.dueAt) || '未标注')),
-            React.createElement('span', null, '模型调用 ' + (badgeFinding ? '1' : '0') + ' 次'),
+            React.createElement('span', { className: 'giou-num' }, '模型调用 ' + String(selected.modelCallCount || 0) + ' 次'),
             selected.source ? React.createElement('span', null, '来源 ' + selected.source) : null,
           ),
         )
+
+        // 「退到哪去了」的第一答案：一条醒目的退回横幅（谁退的、什么时候、什么原因、退过几次），
+        // 不再让用户去详情最底部翻时间线（用户实测反馈：点完退回，找不到退到哪去了）。
+        if (selected.returnedAt) {
+          const latestReject = selected.lastAction && (selected.lastAction.type === '退回并说明' || selected.lastAction.actionCode === 'review_reject') ? selected.lastAction : null
+          const reasonText = textOf((latestReject && latestReject.reason) || '')
+          detail.push(
+            React.createElement(
+              'div',
+              { className: 'giou-line err', key: 'returned' },
+              '已退回 · 待整改：' + (clockOf(selected.returnedAt) || '—') +
+                (latestReject && latestReject.actor ? '　由 ' + latestReject.actor : '') +
+                (selected.returnedCount > 1 ? '　共退回 ' + selected.returnedCount + ' 次' : '') +
+                '；退回原因：「' + (reasonText || '（后端未记录原因文本）') + '」' +
+                '　→ 店长端「待整改」里能看到这条并整改回拍，新单会自动标「整改回拍自 ' + shortNo(selected.id) + '」。',
+            ),
+          )
+        }
 
         if (selected.judgeFailure) {
           detail.push(
@@ -1277,6 +1733,44 @@ window.__ModuleLoader__.load({
             ),
           )
         }
+
+        // 动作记录**放在详情上半区**（改前在整列最底部，判断项一多就得滚很久 —— 用户实测反馈"看不到退到哪去了"）。
+        // 后端 actions 表里每条都带 时间/操作者/动作/原因/结果，这里是它们的第一展示面；下方判断卡上的动作行会写新记录。
+        detail.push(React.createElement('div', { className: 'giou-h2', key: 'tl-h' }, '动作记录（时间 · 操作者 · 结果）'))
+        const timeline = selected.actions.map((action) => ({
+          at: action.createdAt,
+          label: actionLabelOf(action.type, action.target),
+          who: textOf(action.target) || '系统',
+          reason: textOf(action.reason),
+          synced: true,
+        }))
+        for (const record of actions.records) {
+          if (record.target !== selected.id) continue
+          timeline.push({ at: record.at, label: textOf(record.actionWord) || actionLabelOf(record.actionCode || record.type), who: textOf(record.who) || '督导（演示视图）', reason: record.reason, synced: record.synced, resultNote: textOf(record.resultNote) })
+        }
+        detail.push(
+          timeline.length === 0
+            ? React.createElement('div', { className: 'giou-line', key: 'tl-empty' }, '（还没有动作记录：点「通过 / 退回并说明 / 催办」会写入一条）')
+            : React.createElement(
+                'div',
+                { className: 'giou-timeline', key: 'tl' },
+                timeline.map((row, index) =>
+                  React.createElement(
+                    'div',
+                    { key: String(index) },
+                    React.createElement('b', null, row.label),
+                    React.createElement('div', { className: 'giou-statusrow' }, [
+                      React.createElement('span', { className: 'giou-num', key: 'at' }, clockOf(row.at) || '—'),
+                      React.createElement('span', { key: 'who' }, row.who),
+                      row.reason ? React.createElement('span', { key: 'reason' }, row.reason) : null,
+                      row.resultNote ? React.createElement('span', { key: 'note' }, row.resultNote) : null,
+                      row.synced ? null : React.createElement('span', { className: 'giou-chip', key: 'sync', 'data-tone': 'overdue' }, '⚠ 未同步到后端'),
+                    ]),
+                  ),
+                ),
+              ),
+        )
+        if (actions.error) detail.push(React.createElement('div', { className: 'giou-line err', key: 'act-err' }, '动作未写入后端：' + actions.error + '（已在本机留痕，标为「未同步」）'))
 
         const reasons = trim(selected.reasons)
         detail.push(
@@ -1303,160 +1797,381 @@ window.__ModuleLoader__.load({
         }
 
         if (selected.findings.length === 0) {
-          detail.push(React.createElement('div', { className: 'giou-empty', key: 'nofinding' }, '这条提交暂无问题项判断。'))
+          detail.push(React.createElement('div', { className: 'giou-line', key: 'nofinding' }, '这条提交暂无问题项判断。'))
         }
         selected.findings.forEach((finding) => {
-          detail.push(React.createElement(FindingCard, { key: finding.findingId, finding, storeName: selected.storeName, onAction, busyAction: actions.busy }))
+          detail.push(React.createElement(FindingCard, { key: finding.findingId, finding, storeName: selected.storeName, onAction, busyAction: actions.busy, inspectionId: selected.id }))
         })
 
-        detail.push(React.createElement('div', { className: 'giou-title', key: 'tl-h', style: { fontSize: '11px' } }, '动作记录（时间 · 操作者 · 结果）'))
-        const timeline = selected.actions.map((action) => ({
-          at: action.createdAt,
-          label: actionLabelOf(action.type, action.target),
-          who: textOf(action.target) || '系统',
-          reason: textOf(action.reason),
-          synced: true,
-        }))
-        for (const record of actions.records) {
-          if (record.target !== selected.id) continue
-          timeline.push({ at: record.at, label: textOf(record.actionWord) || actionLabelOf(record.actionCode || record.type), who: textOf(record.who) || '督导（演示视图）', reason: record.reason, synced: record.synced, resultNote: textOf(record.resultNote) })
-        }
-        detail.push(
-          timeline.length === 0
-            ? React.createElement('div', { className: 'giou-line', key: 'tl-empty' }, '（还没有动作记录：点「通过 / 退回并说明 / 催办」会写入一条）')
-            : React.createElement(
-                'div',
-                { className: 'giou-timeline', key: 'tl' },
-                timeline.map((row, index) =>
-                  React.createElement(
-                    'div',
-                    { key: String(index) },
-                    React.createElement('b', null, row.label),
-                    ' · ' + (clockOf(row.at) || '—') + ' · ' + row.who + (row.reason ? ' · ' + row.reason : '') + (row.resultNote ? ' · ' + row.resultNote : '') + (row.synced ? '' : ' · ⚠ 未同步到后端'),
-                  ),
-                ),
-              ),
-        )
+        // 标题里的 `·` 是指令 §4 的既有文案（逐字保留）；行内元数据改成独立元素 + 间距，不拼 `·` 串。
+        // （动作记录已上移到详情上半区，见上面 tl-h。）
 
-        if (actions.error) detail.push(React.createElement('div', { className: 'giou-line err', key: 'act-err' }, '动作未写入后端：' + actions.error + '（已在本机留痕，标为「未同步」；需 gaia-inspection-core 提供督导动作的 HTTP 口，见 README §七）'))
         if (scan.phase === 'done' && scan.receipt) detail.push(React.createElement('div', { className: 'giou-line ok', key: 'scan-ok' }, '扫描回执（' + scan.receipt.at + '）：' + scan.receipt.summary))
         else if (scan.phase === 'failed') detail.push(React.createElement('div', { className: 'giou-line err', key: 'scan-fail' }, '扫描未执行：' + scan.error))
       }
 
-      return React.createElement(
-        'div',
-        { className: 'giou-body' },
-        React.createElement('div', { className: 'giou-left' }, children),
-        React.createElement(
-          'div',
-          { className: 'giou-right' },
-          source.failure
-            ? React.createElement(
-                'div',
-                { className: 'giou-line warn', key: 'fail' },
-                data && source.lastOkAt ? '看板数据不可用 · 上次成功 ' + source.lastOkAt + '（显示的是上次成功的数据）' : '看板数据不可用 · ' + source.failure + '（尚无成功数据）',
-              )
-            : null,
-          React.createElement(
-            'div',
-            { className: 'giou-statusrow', key: 'topbar' },
-            React.createElement(
-              'span',
-              { className: 'giou-stats' },
-              '今日 ' + stats.today + ' 条 · 待你判断 ' + stats.pending + ' 条 · ',
-              React.createElement('span', { className: stats.overdue > 0 ? 'bad' : '' }, '逾期 ' + stats.overdue + ' 条'),
-            ),
-            React.createElement('span', { style: { flex: '1' } }),
-            React.createElement('button', { className: 'giou-btn primary', type: 'button', disabled: scan.phase === 'busy', title: CAPABILITY_SCAN + '：触发后端逾期扫描（与真定时器互为备份）', onClick: () => runScan() }, scan.phase === 'busy' ? '扫描中…' : '⏱ 立即扫描'),
-            React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => pullSnapshot() }, '刷新'),
-            React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => panelState.setView('logs') }, '模型调用日志'),
-            React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => panelState.setOpen(false) }, '收起面板'),
-          ),
-          view.view === 'logs' ? React.createElement(LogsView, { key: 'logs' }) : null,
-          view.view === 'board' ? React.createElement('div', { key: 'board' }, detail) : null,
-        ),
+      return React.createElement('div', { className: 'giou-b' }, [
+        React.createElement('div', { className: 'giou-blist', key: 'list' }, children),
+        React.createElement('div', { className: 'giou-bdetail', key: 'detail' }, detail),
+      ])
+    }
+
+    // ── 跨包通道：角色视图（采集包发布）+ 店长端屏（采集包发布的本包要嵌的组件）──
+    // 同一个 agent、两个视图（§7 既定口径）。采集包没装载时本包只降级、不假装有界面。
+    const UI_CHANNEL = '__gaia_inspection_ui__'
+    const ROLE_CHANNEL = '__gaia_inspection_view__'
+
+    function channelOf(name) {
+      const channel = globalThis[name]
+      return channel && typeof channel === 'object' ? channel : null
+    }
+
+    function useCaptureScreen() {
+      return React.useSyncExternalStore(
+        (listener) => {
+          const channel = channelOf(UI_CHANNEL)
+          if (!channel || typeof channel.subscribe !== 'function') return () => {}
+          return channel.subscribe(listener)
+        },
+        () => {
+          const channel = channelOf(UI_CHANNEL)
+          return channel && typeof channel.getScreen === 'function' ? channel.getScreen() : null
+        },
+        () => null,
       )
     }
 
-    // ── 组件：督导端主面板（不遮挡右侧全高面板）────────────────────────────
-    function OversightPanel() {
+    function useRole() {
+      return React.useSyncExternalStore(
+        (listener) => {
+          const channel = channelOf(ROLE_CHANNEL)
+          if (!channel || typeof channel.subscribe !== 'function') return () => {}
+          return channel.subscribe(listener)
+        },
+        () => {
+          const channel = channelOf(ROLE_CHANNEL)
+          return channel && typeof channel.getRole === 'function' ? channel.getRole() : 'supervisor'
+        },
+        () => 'supervisor',
+      )
+    }
+
+    function assignRole(role) {
+      const channel = channelOf(ROLE_CHANNEL)
+      if (channel && typeof channel.setRole === 'function') channel.setRole(role)
+    }
+
+    // ── 组件：三态（加载中 / 空 / 失败）——任何数据面都不许留白屏（§5.2）──────
+    function DataState({ kind, title, detail, actionLabel, onAction }) {
+      const children = []
+      if (kind === 'loading') {
+        for (let index = 0; index < 3; index += 1) children.push(React.createElement('div', { className: 'giou-skel', key: 'sk' + index }))
+      } else {
+        children.push(React.createElement('div', { className: 't', key: 'title' }, title))
+        if (detail) children.push(React.createElement('div', { className: 'd', key: 'detail' }, detail))
+        if (actionLabel && onAction) {
+          // 三态的动作一律用中性按钮：一屏只留一个 #1D4ED8（§2「强调色一屏只给一个主 CTA 用」）。
+          children.push(React.createElement('button', { className: 'giou-btn', type: 'button', key: 'act', onClick: onAction }, actionLabel))
+        }
+      }
+      return React.createElement('div', { className: 'giou-state', 'data-kind': kind }, children)
+    }
+
+    // ── 组件：首屏角色选择（对角错位两卡；文案逐字来自指令 §3）────────────────
+    function RoleSelect() {
+      const enter = (role) => {
+        assignRole(role)
+        panelState.setEntered(true)
+        panelState.setView('board')
+      }
+      const card = (id, name, why, hint, cta, role) =>
+        React.createElement(
+          'section',
+          { className: 'giou-role ' + id, key: id },
+          React.createElement('div', { className: 'giou-role-depth' }, [
+            // 首屏也把能力词「角色视图切换」摆在眼前：两张卡就是这次切换的两个选项。
+            React.createElement('div', { className: 'giou-role-eyebrow', key: 'eb' }, '角色视图切换'),
+            React.createElement('div', { className: 'giou-role-name', key: 'nm' }, name),
+            React.createElement('div', { className: 'giou-role-why', key: 'why' }, why),
+            React.createElement('div', { className: 'giou-role-hint', key: 'hint' }, hint),
+          ]),
+          React.createElement('button', { className: 'giou-role-cta', type: 'button', onClick: () => enter(role) }, cta),
+        )
+      return React.createElement('div', { className: 'giou-roles' }, [
+        card(
+          'manager',
+          '店长端',
+          '交班时拍一张照片，再写一句话。Agent 看完照片与这句话，当场决定该查哪几项。',
+          '3 分钟内可提交完',
+          '进入店长端',
+          'manager',
+        ),
+        card(
+          'supervisor',
+          '总部督导端',
+          '先看「为什么查这几项」，再看判断与依据。有坐标就框选原图，没坐标就标点并说明。',
+          '逾期自动升级',
+          '进入督导端',
+          'supervisor',
+        ),
+      ])
+    }
+
+    // ── 承载面：整窗表层（shell.overlay）还是 main 槽内联（兜底）────────────
+    /**
+     * 两个承载面共用同一棵树，但**同一时刻只渲染一个**：
+     *   · `shell.overlay` 条目注册成功（ready）→ 由整窗表层渲染，main 席位让位（返回 null）；
+     *   · 宿主没有 `shell.overlay`（自测垫片 / 裁剪过的宿主）→ main 席位内联渲染，界面不消失。
+     * 「进入本面板」= main 席位在挂（宿主点左栏项 → selectPanel → keyed main 只渲染本 key），
+     * 于是席位挂上就把整窗表层点亮 —— 这一步同时满足「全覆盖」和「不抢占会话」（用户不看时表层是空的）。
+     */
+    const surfaceState = {
+      ready: false,
+      seat: false,
+      snapshot: { ready: false, seat: false },
+      listeners: new Set(),
+      subscribe(listener) {
+        surfaceState.listeners.add(listener)
+        return () => surfaceState.listeners.delete(listener)
+      },
+      notify() {
+        surfaceState.snapshot = { ready: surfaceState.ready, seat: surfaceState.seat }
+        surfaceState.listeners.forEach((listener) => {
+          try {
+            listener()
+          } catch (error) {
+            /* 忽略 */
+          }
+        })
+      },
+      setReady(next) {
+        const value = next === true
+        if (value === surfaceState.ready) return
+        surfaceState.ready = value
+        surfaceState.notify()
+      },
+      setSeat(next) {
+        const value = next === true
+        if (value === surfaceState.seat) return
+        surfaceState.seat = value
+        surfaceState.notify()
+      },
+    }
+    function useSurfaceState() {
+      return React.useSyncExternalStore(surfaceState.subscribe, () => surfaceState.snapshot, () => surfaceState.snapshot)
+    }
+    /** `shell.overlay` 条目：只有 main 席位在挂（= 用户进了「巡店自查」）时才渲染整窗界面。 */
+    function AppSurface() {
+      const s = useSurfaceState()
+      if (!s.seat || !s.ready) return null
+      return React.createElement(InspectionApp, { surface: 'window', key: 'app' })
+    }
+    /** `main` 槽席位：宿主没有整窗表层时内联渲染；有表层则让位（避免两份界面同时轮询）。 */
+    function MainSeat() {
+      const s = useSurfaceState()
+      React.useEffect(() => {
+        surfaceState.setSeat(true)
+        return () => surfaceState.setSeat(false)
+      }, [])
+      if (s.ready) return null
+      return React.createElement(InspectionApp, { surface: 'panel', key: 'app' })
+    }
+
+    // ── 组件：整屏外壳（首屏 → 店长端 / 督导端 / 日志；三块面板同一容器规格）──
+    /**
+     * @param surface - 'window'（shell.overlay 整窗表层）| 'panel'（main 槽内联兜底）
+     */
+    function InspectionApp({ surface }) {
       const view = React.useSyncExternalStore(panelState.subscribe, () => panelState.snapshot, () => panelState.snapshot)
       const scan = React.useSyncExternalStore(scanState.subscribe, () => scanState.snapshot, () => scanState.snapshot)
       const source = React.useSyncExternalStore(snapshotSource.subscribe, () => snapshotSource.snapshot, () => snapshotSource.snapshot)
+      const role = useRole()
+      const CaptureScreen = useCaptureScreen()
+      const [recheck, setRecheck] = React.useState(0)
 
       React.useEffect(() => {
-        if (!view.open) return undefined
         pullSnapshot()
         return undefined
-      }, [view.open])
+      }, [])
 
-      if (!view.open) return null
-
+      const entered = view.entered === true
+      const isManager = role !== 'supervisor'
+      const logsOn = entered && view.view === 'logs'
+      const boardOn = entered && !isManager && !logsOn
       const stats = statsOf(source.data, Date.now())
       const offline = source.data && source.data.offline ? source.data.offline.offline === true : false
       const queue = source.data && source.data.pendingQueue ? source.data.pendingQueue : null
 
-      return React.createElement(
-        'div',
-        { className: 'giou-panel' },
+      const enterRole = (next) => {
+        assignRole(next)
+        panelState.setEntered(true)
+        panelState.setView('board')
+      }
+
+      const navBtn = (key, label, on, onClick) =>
         React.createElement(
-          'div',
-          { className: 'giou-top' },
-          React.createElement('span', { className: 'giou-tabs' }, [
-            React.createElement('button', { key: 'board', type: 'button', 'data-on': view.view === 'board' ? '1' : '0', onClick: () => panelState.setView('board') }, CAPABILITY_BOARD),
-            React.createElement('button', { key: 'logs', type: 'button', 'data-on': view.view === 'logs' ? '1' : '0', onClick: () => panelState.setView('logs') }, CAPABILITY_LOGS),
+          'button',
+          { className: 'giou-navbtn', type: 'button', key, 'data-on': on ? '1' : '0', 'aria-current': on ? 'page' : undefined, onClick },
+          [React.createElement('span', { className: 'giou-navdot', key: 'dot' }), label],
+        )
+
+      // 左导航：整窗覆盖后 DSH 自己的左栏被盖住，导航由本应用提供（品牌 / 角色视图切换 / 日志 / 动作）。
+      const nav = React.createElement('nav', { className: 'giou-nav', key: 'nav' }, [
+        React.createElement('div', { className: 'giou-navbrand', key: 'brand' }, [
+          React.createElement('div', { className: 'giou-navmark', key: 'mark' }, '督'),
+          React.createElement('div', { className: 'giou-navname', key: 'name' }, [
+            React.createElement('div', { className: 'giou-navtitle', key: 't' }, '门店督导'),
+            React.createElement('div', { className: 'giou-navsub', key: 's' }, '巡店自查 · 判断回放'),
           ]),
+        ]),
+        React.createElement('div', { className: 'giou-navgroup', key: 'g1' }, [
+          React.createElement('div', { className: 'giou-navlabel', key: 'l' }, '角色视图切换'),
+          navBtn('manager', CAPABILITY_CAPTURE, entered && isManager && !logsOn, () => enterRole('manager')),
+          navBtn('supervisor', CAPABILITY_BOARD, boardOn, () => enterRole('supervisor')),
+        ]),
+        React.createElement('div', { className: 'giou-navgroup', key: 'g2' }, [
+          React.createElement('div', { className: 'giou-navlabel', key: 'l' }, '模型调用记录'),
+          navBtn('logs', CAPABILITY_LOGS, logsOn, () => panelState.setView(logsOn ? 'board' : 'logs')),
+        ]),
+        React.createElement('span', { className: 'giou-grow', key: 'grow' }),
+        React.createElement('div', { className: 'giou-navfoot', key: 'foot' }, [
+          !isManager && !logsOn
+            ? React.createElement(
+                'button',
+                { className: 'giou-navcta', type: 'button', key: 'scan', disabled: scan.phase === 'busy', title: CAPABILITY_SCAN + '：触发后端逾期扫描（与真定时器互为备份）', onClick: () => runScan() },
+                scan.phase === 'busy' ? '扫描中…' : '⏱ 立即扫描',
+              )
+            : null,
+          React.createElement('button', { className: 'giou-navbtn ghost', type: 'button', key: 'role', onClick: () => panelState.setEntered(false) }, '切换角色'),
           React.createElement(
-            'span',
-            { className: 'giou-stats' },
-            '今日 ' + stats.today + ' 条 · 待你判断 ' + stats.pending + ' 条 · ',
-            React.createElement('span', { className: stats.overdue > 0 ? 'bad' : '' }, '逾期 ' + stats.overdue + ' 条'),
+            'button',
+            { className: 'giou-navbtn ghost', type: 'button', key: 'back', title: '返回会话：离开巡店自查，回到 DSH 对话（左栏「巡店自查」可再进来）', onClick: () => leaveMainPanel() },
+            '返回会话',
           ),
-          React.createElement('span', { style: { flex: '1' } }),
-          React.createElement('button', { className: 'giou-btn', type: 'button', disabled: scan.phase === 'busy', onClick: () => runScan() }, scan.phase === 'busy' ? '扫描中…' : '⏱ 立即扫描'),
-          React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => pullSnapshot() }, '刷新'),
-          React.createElement('button', { className: 'giou-btn', type: 'button', onClick: () => panelState.setOpen(false) }, '关闭'),
-        ),
-        offline
-          ? React.createElement('div', { className: 'giou-line warn', style: { margin: '8px 12px 0' } }, '离线：仅采集排队，不产生模型判断' + (queue && typeof queue.pending === 'number' ? '（待判队列 ' + queue.pending + ' 条）' : '') + '；联网后自动补判。')
-          : null,
-        view.view === 'logs' ? React.createElement(LogsView, { key: 'logs' }) : React.createElement(BoardView, { key: 'board' }),
-      )
+        ]),
+      ])
+
+      /** 外壳骨架：标题带（Windows 标题栏让位）+ 左导航 + 主区（顶栏 / 提示行 / 正文）。 */
+      const frame = (title, sub, topRight, notice, content) =>
+        React.createElement('div', { className: 'giou-root', 'data-surface': surface === 'window' ? 'window' : 'panel' }, [
+          React.createElement('div', { className: 'giou-titlebar', key: 'titlebar' }),
+          React.createElement('div', { className: 'giou-appbody', key: 'appbody' }, [
+            nav,
+            React.createElement('div', { className: 'giou-main', key: 'main' }, [
+              React.createElement('div', { className: 'giou-top', key: 'top' }, [
+                React.createElement('div', { className: 'giou-topmain', key: 'topmain' }, [
+                  React.createElement('div', { className: 'giou-title', key: 't' }, title),
+                  React.createElement('div', { className: 'giou-sub', key: 's' }, sub),
+                ]),
+                React.createElement('span', { className: 'giou-grow', key: 'grow' }),
+                React.createElement('div', { className: 'giou-topright', key: 'topright' }, topRight),
+              ]),
+              notice && notice.length ? React.createElement('div', { className: 'giou-notices', key: 'notices' }, notice) : null,
+              React.createElement('div', { className: 'giou-content', key: 'content' }, content),
+            ]),
+          ]),
+        ])
+
+      if (!entered) {
+        // 首屏（指令 §3）：每次启动都落在角色选择；整窗表层下它就是整屏首屏，不再是 DSH 里的一个入口。
+        return frame('门店督导', '两个角色视图：店长端负责采集，总部督导端负责判断与回放。选一个进入。', [], null, React.createElement(RoleSelect, { key: 'roles' }))
+      }
+
+      const title = logsOn ? CAPABILITY_LOGS : isManager ? CAPABILITY_CAPTURE : CAPABILITY_BOARD
+      const sub = logsOn
+        ? '逐条模型调用记录：时间 / 模型 / 提示词版本 / 提交编号 / 请求摘要 / 响应摘要 / 耗时'
+        : isManager
+          ? '交班时拍一张照片，再写一句话。Agent 看完照片与这句话，当场决定该查哪几项。'
+          : '先看「为什么查这几项」，再看判断与依据。有坐标就框选原图，没坐标就标点并说明。'
+
+      // 顶栏右端：督导端看板时给三枚统计 + 刷新（角色切换与日志入口已收进左导航，顶栏只留状态与动作）。
+      const topRight = []
+      if (boardOn) {
+        topRight.push(
+          React.createElement('div', { className: 'giou-statusrow', key: 'stats' }, [
+            React.createElement('span', { className: 'giou-chip giou-num', key: 'a' }, '今日 ' + stats.today + ' 条'),
+            React.createElement('span', { className: 'giou-chip giou-num', key: 'b' }, '待你判断 ' + stats.pending + ' 条'),
+            React.createElement('span', { className: 'giou-chip giou-num', key: 'c', 'data-tone': stats.overdue > 0 ? 'overdue' : 'none' }, '逾期 ' + stats.overdue + ' 条'),
+          ]),
+        )
+        topRight.push(React.createElement('button', { className: 'giou-btn quiet', key: 'refresh', type: 'button', onClick: () => pullSnapshot() }, '刷新'))
+      }
+
+      const notice = []
+      if (offline && !isManager) {
+        notice.push(
+          React.createElement(
+            'div',
+            { className: 'giou-line warn', key: 'offline' },
+            '离线：仅采集排队，不产生模型判断' + (queue && typeof queue.pending === 'number' ? '（待判队列 ' + queue.pending + ' 条）' : '') + '；联网后自动补判。',
+          ),
+        )
+      }
+      if (source.failure && !isManager && !logsOn) {
+        notice.push(
+          React.createElement(
+            'div',
+            { className: 'giou-line err', key: 'fail' },
+            source.data && source.lastOkAt ? '看板数据不可用：上次成功 ' + source.lastOkAt + '（显示的是上次成功的数据）' : '看板数据不可用：' + source.failure + '（尚无成功数据）',
+          ),
+        )
+      }
+
+      let body = null
+      if (logsOn) body = React.createElement(LogsView, { key: 'logs' })
+      else if (isManager) {
+        body = CaptureScreen
+          ? React.createElement(CaptureScreen, { key: 'capture' + String(recheck) })
+          : React.createElement(
+              'div',
+              { className: 'giou-content giou-pad', key: 'nocapture' },
+              React.createElement(DataState, {
+                kind: 'fail',
+                title: '门店自查采集入口未装载',
+                detail: '采集界面包（gaia-inspection-capture-ui）未启用或未装载，主区域没有可渲染的店长端界面。装载后点「重新检查」。',
+                actionLabel: '重新检查',
+                onAction: () => setRecheck(recheck + 1),
+              }),
+            )
+      } else body = React.createElement(BoardView, { key: 'board' })
+
+      return frame(title, sub, topRight, notice, body)
     }
 
-    /** 右侧栏里的独立 tab：模型调用日志（与面板入口并存，两个入口都一步可点）。 */
+    /** 右侧栏里的独立 tab：模型调用日志（与主面板入口并存，两个入口都一步可点）。 */
+    // 契约 §3.4-4：正文容器换成新的 `.giou-root` 包裹（旧 `.giou-panel` 类已删除，不改会变成无样式）。
     function LogsTabBody() {
       React.useEffect(() => {
         pullLogs()
         return undefined
       }, [])
-      return React.createElement('div', { className: 'giou-panel', style: { position: 'static', width: '100%', boxShadow: 'none', borderLeft: 'none' } }, React.createElement(LogsView, {}))
+      return React.createElement('div', { className: 'giou-root' }, React.createElement(LogsView, {}))
     }
 
-    /** 输入区的督导端入口（只在督导端视图显示；店长端视图由采集包负责）。 */
-    function OversightDockEntry() {
-      const role = React.useSyncExternalStore(
-        (listener) => {
-          const channel = globalThis.__gaia_inspection_view__
-          if (!channel || typeof channel.subscribe !== 'function') return () => {}
-          return channel.subscribe(listener)
-        },
-        () => {
-          const channel = globalThis.__gaia_inspection_view__
-          return channel && typeof channel.getRole === 'function' ? channel.getRole() : 'supervisor'
-        },
-        () => 'supervisor',
-      )
-      if (role === 'manager') return null
+    /** 左栏入口图标：`sidebar.panellist` 是 list 槽，列表项要一个图标组件。 */
+    function PanelIcon() {
       return React.createElement(
-        'div',
-        { style: { display: 'inline-flex', gap: '6px', alignItems: 'center' } },
-        React.createElement('button', { className: 'giou-dockbtn', type: 'button', onClick: () => panelState.setOpen(true, 'board') }, '🧾 ' + CAPABILITY_BOARD),
-        React.createElement('button', { className: 'giou-dockbtn', type: 'button', onClick: () => panelState.setOpen(true, 'logs') }, '📜 ' + CAPABILITY_LOGS),
+        'svg',
+        { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true', focusable: 'false' },
+        [
+          React.createElement('path', { key: 'a', d: 'M4 20V9.6L12 4l8 5.6V20' }),
+          React.createElement('path', { key: 'b', d: 'M9.5 20v-5.2h5V20' }),
+        ],
       )
     }
+
+    // ── 挂载段自用常量（不动上面的常量区）──────────────────────────────────
+    const MAIN_SLOT = 'main'
+    const SIDEBAR_SLOT = 'sidebar.panellist'
+    /** 本包自己的 key：左栏 id 与 main 的 key 必须是同一个（`Each list id addresses the matching main panel`）。 */
+    const MAIN_PANEL_ID = 'gaia-inspection'
+    /** 整窗表层的条目 id：自己起一个，追加在宿主已有条目旁边（复用宿主 id 会顶掉它）。 */
+    const SEAT_OVERLAY_ID = 'gaia-inspection.app'
 
     // ── 挂载 ────────────────────────────────────────────────────────────────
+    // 平台事实（实施契约 §1）：`main` 是 keyed/root 槽（必须有 key，且不用 conversation 这个已占用的 key）；
+    // `sidebar.panellist` 是 list/root 槽（必须有 id，id 就是 main 的 key）；点左栏图标由宿主自己 selectPanel。
+    // 本产品的三块界面都在本面板里（无真正弹窗），因此**不再注册 shell.overlay**。
     function apply(ctx) {
       const styleEl = document.createElement('style')
       styleEl.setAttribute('data-plugin', 'gaia-inspection-oversight-ui')
@@ -1465,21 +2180,100 @@ window.__ModuleLoader__.load({
 
       exposeChannels()
 
-      const slots = ctx && typeof ctx.get === 'function' ? ctx.get('slots') : undefined
+      // 【真机实测必须项】宿主只在**声明式依赖**就绪后才 apply；不写 exports.inject 时 `ctx.get('slots')`
+      // 返回 undefined，本包会一路 return，界面上一个入口都不会出现（实测：真实成品窗口里左栏没有「巡店自查」）。
+      // 取服务优先用注入后的 ctx.slots / ctx.layout，找不到再退回 ctx.get(...)（兼容自测垫片）。
+      const slots = (ctx && ctx.slots) || (ctx && typeof ctx.get === 'function' ? ctx.get('slots') : undefined)
       const tabs = ctx && typeof ctx.get === 'function' ? ctx.get('sidebarRightTabs') : undefined
-      const sidebarRight = ctx && typeof ctx.get === 'function' ? ctx.get('sidebarRight') : undefined
       if (!slots) {
-        console.warn('[gaia-inspection-oversight-ui] 宿主未提供 slots 服务，四个界面都未挂载')
+        console.warn('[gaia-inspection-oversight-ui] 宿主未提供 slots 服务，界面未挂载')
         return
       }
 
-      // ① 主面板（屏 B）：不遮挡的右侧全高面板，会话照常可读。
+      /** 切主区域：`ctx.layout.selectPanel(id)`；**必须在自己的 main 注册之后调用**（否则宿主抛未注册）。 */
+      const selectPanel = (id) => {
+        const layout = ctx && typeof ctx.get === 'function' ? ctx.get('layout') : undefined
+        if (!layout || typeof layout.selectPanel !== 'function') {
+          console.warn('[gaia-inspection-oversight-ui] 宿主未提供 layout.selectPanel：无法自动切主面板（点左栏「巡店自查」同样能进）')
+          return false
+        }
+        try {
+          layout.selectPanel(id)
+          return true
+        } catch (error) {
+          console.warn('[gaia-inspection-oversight-ui] 切换主面板失败：', error)
+          return false
+        }
+      }
+
+      /**
+       * 进入本面板：`setEntered(true)`（跳过首屏角色选择）+ 可选切视图 + 把主区域切到本面板。
+       * 三个入口都走它，保证点完有肉眼可见变化（§5.1：不留点了没反应的按钮）。
+       */
+      const enterPanel = (view) => {
+        panelState.setEntered(true)
+        if (view === 'board' || view === 'logs') panelState.setView(view)
+        selectPanel(MAIN_PANEL_ID)
+      }
+
+      // 供旧内省通道 `__gaia_inspection_oversight__.openPanel / closePanel` 使用（closePanel = selectPanel(null) 回会话）。
+      enterMainPanel = enterPanel
+      leaveMainPanel = () => selectPanel(null)
+
+      // ① 左栏入口：sidebar.panellist（list 槽；id 必须与 main 的 key 一致，否则点了切不过去）。
       ctx.effect(
-        () => slots.inject(OVERLAY_SLOT, () => slots.register({ name: OVERLAY_SLOT, id: 'gaia-inspection-oversight-panel', order: 44, label: CAPABILITY_BOARD, children: {} }, OversightPanel)),
-        'gaia-inspection-oversight-ui: oversight panel',
+        () =>
+          slots.inject(SIDEBAR_SLOT, () =>
+            slots.register({ name: SIDEBAR_SLOT, id: MAIN_PANEL_ID, order: 30, label: '巡店自查' }, () => React.createElement(PanelIcon)),
+          ),
+        'gaia-inspection-oversight-ui: sidebar panellist entry',
       )
 
-      // ② 右侧栏「模型调用日志」独立 tab（tab 类型 + keyed 正文）。
+      // ② 主区域席位：main（keyed 槽；key 用本包自己的，不占 conversation）。
+      //    席位本身只是「用户进了本面板」的信号：整窗表层可用时让位，不可用时内联兜底。
+      let autoEntered = false
+      ctx.effect(
+        () =>
+          slots.inject(MAIN_SLOT, () => {
+            const dispose = slots.register({ name: MAIN_SLOT, key: MAIN_PANEL_ID }, () => React.createElement(MainSeat))
+            // 启动即进入本面板：本产品就是「门店督导」，首屏不该先落在 DSH 对话上
+            // （用户反馈：界面「只是做了一个入口，还是嵌在 dsh 界面里的」）。selectPanel 必须在
+            // main 注册**之后**调用，否则宿主抛 `main panel "…" is not registered`。
+            if (!autoEntered) {
+              autoEntered = true
+              selectPanel(MAIN_PANEL_ID)
+            }
+            return dispose
+          }),
+        'gaia-inspection-oversight-ui: main panel seat',
+      )
+
+      // ②b 整窗表层（全覆盖）：注册进 shell.overlay。内核槽位契约的原话是「要一个覆盖整个 app 的
+      //     自己的表层，就注册进 shell.overlay」——它是 list/root 槽（追加式，不替换任何已有条目），
+      //     宿主把它渲染在 absolute/inset:0/z-index:20 的浮层里，盖住左中右三栏；层本身是
+      //     click-through 的，条目要自己 opt-in 指针事件（见 CSS 的 [data-surface="window"]）。
+      ctx.effect(
+        () =>
+          slots.inject(OVERLAY_SLOT, () => {
+            surfaceState.setReady(true)
+            return slots.register({ name: OVERLAY_SLOT, id: SEAT_OVERLAY_ID, order: 100, label: '门店督导' }, () => React.createElement(AppSurface))
+          }),
+        'gaia-inspection-oversight-ui: shell overlay surface',
+      )
+
+      // ③ 注册完 main 之后发布跨包通道：采集包用 `__gaia_inspection_shell__.open(view)` 一步打开本面板。
+      globalThis.__gaia_inspection_shell__ = {
+        version: 1,
+        open(view) {
+          enterPanel(view)
+        },
+        subscribe(listener) {
+          if (typeof listener !== 'function') return () => {}
+          return panelState.subscribe(listener)
+        },
+      }
+
+      // ④ 右侧栏「模型调用日志」独立 tab（保留现状：tab 类型 + keyed 正文；正文容器已换新）。
       if (tabs && typeof tabs.register === 'function') {
         ctx.effect(
           () =>
@@ -1493,32 +2287,31 @@ window.__ModuleLoader__.load({
           'gaia-inspection-oversight-ui: logs tab type',
         )
       } else {
-        console.warn('[gaia-inspection-oversight-ui] 宿主未提供 sidebarRightTabs：右侧栏日志 tab 未注册（面板与 header 入口仍可用）')
+        console.warn('[gaia-inspection-oversight-ui] 宿主未提供 sidebarRightTabs：右侧栏日志 tab 未注册（左栏入口与会话 header 入口仍可用）')
       }
       ctx.effect(
         () => slots.inject(TAB_SLOT, () => slots.register({ name: TAB_SLOT, key: LOGS_TAB_KIND, children: {} }, LogsTabBody)),
         'gaia-inspection-oversight-ui: logs tab body',
       )
 
-      const openPanel = (view) => panelState.setOpen(true, view)
-      const openRightbarLogs = () => {
-        try {
-          if (sidebarRight && typeof sidebarRight.openTab === 'function') {
-            sidebarRight.openTab(LOGS_TAB_KIND, {})
-            return
-          }
-        } catch (error) {
-          console.warn('[gaia-inspection-oversight-ui] 打开右侧栏失败：', error)
-        }
-        openPanel('logs')
-      }
-
-      // ③ 会话 header 入口：看板面板 / 立即扫描 / 模型调用日志（后两个是独立入口，一步可点）。
+      // ⑤ 会话 header 三枚入口：看板 / 立即扫描 / 模型调用日志（每枚都真的切过去，前两枚顺带切到督导端角色）。
       ctx.effect(
         () =>
           slots.inject(HEADER_SLOT, () =>
             slots.register({ name: HEADER_SLOT, id: 'gaia-inspection-oversight-board', order: 43, label: CAPABILITY_BOARD }, () =>
-              React.createElement('button', { className: 'giou-dockbtn', type: 'button', title: '打开' + CAPABILITY_BOARD, onClick: () => openPanel('board') }, '🧾 ' + CAPABILITY_BOARD),
+              React.createElement(
+                'button',
+                {
+                  className: 'giou-dockbtn',
+                  type: 'button',
+                  title: '打开' + CAPABILITY_BOARD + '（切到总部督导端）',
+                  onClick: () => {
+                    assignRole('supervisor')
+                    enterPanel('board')
+                  },
+                },
+                '🧾 ' + CAPABILITY_BOARD,
+              ),
             ),
           ),
         'gaia-inspection-oversight-ui: header entry board',
@@ -1527,7 +2320,20 @@ window.__ModuleLoader__.load({
         () =>
           slots.inject(HEADER_SLOT, () =>
             slots.register({ name: HEADER_SLOT, id: 'gaia-inspection-oversight-scan', order: 44, label: CAPABILITY_SCAN }, () =>
-              React.createElement('button', { className: 'giou-dockbtn', type: 'button', title: CAPABILITY_SCAN + '：触发一次后端逾期扫描', onClick: () => runScan() }, '⏱ 立即扫描'),
+              React.createElement(
+                'button',
+                {
+                  className: 'giou-dockbtn',
+                  type: 'button',
+                  title: CAPABILITY_SCAN + '：切到督导端并触发一次后端逾期扫描',
+                  onClick: () => {
+                    assignRole('supervisor')
+                    enterPanel('board')
+                    runScan()
+                  },
+                },
+                '⏱ 立即扫描',
+              ),
             ),
           ),
         'gaia-inspection-oversight-ui: header entry scan',
@@ -1536,21 +2342,28 @@ window.__ModuleLoader__.load({
         () =>
           slots.inject(HEADER_SLOT, () =>
             slots.register({ name: HEADER_SLOT, id: 'gaia-inspection-oversight-logs', order: 45, label: CAPABILITY_LOGS }, () =>
-              React.createElement('button', { className: 'giou-dockbtn', type: 'button', title: '打开' + CAPABILITY_LOGS, onClick: openRightbarLogs }, '📜 模型调用日志'),
+              React.createElement(
+                'button',
+                {
+                  className: 'giou-dockbtn',
+                  type: 'button',
+                  title: '打开' + CAPABILITY_LOGS + '（不改角色视图）',
+                  onClick: () => {
+                    enterPanel('logs')
+                  },
+                },
+                '📜 ' + CAPABILITY_LOGS,
+              ),
             ),
           ),
         'gaia-inspection-oversight-ui: header entry logs',
       )
 
-      // ④ 输入区入口（督导端视图下显示）。
-      ctx.effect(
-        () => slots.inject(DOCK_SLOT, () => slots.register({ name: DOCK_SLOT, id: 'gaia-inspection-oversight-entry', order: 43, label: CAPABILITY_BOARD }, OversightDockEntry)),
-        'gaia-inspection-oversight-ui: input dock entry',
-      )
-
       pullSnapshot()
     }
 
+    /** 声明式依赖：slots 必给；layout 用于「点入口切主区域」（拿不到时降级为只提示，不影响挂载）。 */
+    exports.inject = ['slots', 'layout']
     exports.apply = apply
     exports.__test = {
       CAPABILITY_BOARD,
@@ -1582,11 +2395,16 @@ window.__ModuleLoader__.load({
       actionLabelOf,
       BoardView,
       LogsView,
-      OversightPanel,
       LogsTabBody,
-      OversightDockEntry,
+      PanelIcon,
       EvidenceArea,
       FindingCard,
+      InspectionApp,
+      AppSurface,
+      MainSeat,
+      surfaceState,
+      MAIN_PANEL_ID,
+      SEAT_OVERLAY_ID,
       snapshotSource,
       logsSource,
       scanState,

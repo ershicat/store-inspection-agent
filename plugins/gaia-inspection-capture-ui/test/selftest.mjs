@@ -1,10 +1,17 @@
 // gaia-inspection-capture-ui / fe 交接前自测（Node 下跑，零第三方依赖）。
 //
-// 对齐《界面实现说明（画面级）》屏 A：视图标签 / 演示替身提示条 / 门店下拉 / 单张照片（jpg·png、不调摄像头）
-// / 一句话 1–200 字与实时字数 / [载入示例] [提交并分析] / 五态状态行逐字 / 失败保留输入与照片 / 同门店不许重复提交。
+// 对齐《实施契约》§2/§3.5（前端重做）后本包的新形态：
+//   · 挂载点只有两处：conversation.input.dock（1 枚「门店自查采集入口」）+ conversation.session.header.actions，
+//     **不再注册 shell.overlay**（也不注册督导包的 sidebar.panellist / main）。
+//   · 通道两件：__gaia_inspection_view__ {getRole,setRole,subscribe}（角色唯一真源）
+//     + __gaia_inspection_ui__ {version:1, getScreen, subscribe}（店长端屏组件，供督导包外壳内嵌）。
+//   · 屏 A = CaptureScreen：整屏两栏（左 .gicu-hero 照片投放区＝视觉主角 / 右 .gicu-form），无手机壳浮层。
+//   · CSS 令牌与硬口径（间距/圆角同心/两级阴影/四态/具名 transition/按钮 44px/禁用灰化/tabular-nums/
+//     图片 1px 纯黑 10% outline/禁 `·` 拼元数据/禁按钮 `→`）逐条机检。
 //
 // 覆盖：① 宿主半 import / inject / 只读内省路由；② client 装载契约；③ **在最小 React/DOM/fetch 垫片下把屏 A
-// 渲染出来并跑真实提交流程**；④ manifest.keywords 逐字；⑤ 纯函数（单张与类型校验、回执读取、编号短化、离线归一）。
+// 渲染出来并跑真实提交流程**（垫片忠实模拟 useSyncExternalStore 的 Object.is 契约，不许退回旧垫片）；
+// ④ manifest.keywords 逐字；⑤ 纯函数不变量（单张与类型校验、回执读取、编号短化、离线归一、门店文案、同门店锁）。
 // 用法：node test/selftest.mjs
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -174,8 +181,25 @@ function findAll(node, tag) {
   walk(node)
   return out
 }
+/** 按类名找元素（类名可能是一串，按空白切分后精确比对）。 */
+function findByClass(node, cls) {
+  const out = []
+  const walk = (n) => {
+    if (!n) return
+    const name = n.props && n.props.className
+    if (typeof name === 'string' && name.split(/\s+/).indexOf(cls) !== -1) out.push(n)
+    if (n.children) for (const child of n.children) walk(child)
+    if (n.rendered) walk(n.rendered)
+  }
+  walk(node)
+  return out
+}
 function buttonByLabel(tree, label) {
   return findAll(tree, 'button').find((b) => vnodeText(b).indexOf(label) !== -1)
+}
+/** 屏 A 的五态状态行：.gicu-state[data-line="1"]（data-kind = idle/running/ok/bad/off）。 */
+function stateLineOf(tree) {
+  return findByClass(tree, 'gicu-state').find((n) => n.props && n.props['data-line'] === '1') || null
 }
 /** 提交阶段：登记 store 订阅（等价 React 的 subscribe），快照换引用时把宿主组件标脏。 */
 function commitStoreSubscriptions() {
@@ -240,10 +264,13 @@ function makeCanvasShim() {
   }
 }
 const canvasShim = makeCanvasShim()
+const styleEls = []
 globalThis.document = {
   createElement: (tag) => {
     if (tag === 'canvas') return canvasShim.canvas
-    return { setAttribute() {}, dataset: {}, textContent: '' }
+    const el = { setAttribute() {}, dataset: {}, textContent: '', addEventListener() {}, removeEventListener() {} }
+    if (tag === 'style') styleEls.push(el)
+    return el
   },
   head: { appendChild() {} },
   addEventListener() {},
@@ -298,7 +325,7 @@ globalThis.FileReader = class {
   }
 }
 
-// ── ③ 加载 client 半并渲染屏 A ─────────────────────────────────────────────
+// ── ③ 加载 client 半：挂载点 / 通道 / 屏 A ─────────────────────────────────
 const clientCode = readFileSync(join(root, clientRel), 'utf8')
 let clientError = ''
 try {
@@ -332,28 +359,150 @@ try {
   clientApplyError = String((error && error.message) || error)
 }
 check('client apply 不抛错', !clientApplyError, clientApplyError)
-check('注册了输入区入口（视图标签 + 采集入口）', slotSpecs.some((s) => s.spec.name === 'conversation.input.dock'), JSON.stringify(slotSpecs.map((s) => s.spec.name)))
-check('注册了屏 A 浮层（无遮罩）', slotSpecs.some((s) => s.spec.name === 'shell.overlay'), '')
-check('注册了会话 header 入口', slotSpecs.some((s) => s.spec.name === 'conversation.session.header.actions'), '')
 
-// 打开采集面 → 渲染屏 A
-test.panel.setOpen(true)
-const panelComponent = slotSpecs.find((s) => s.spec.name === 'shell.overlay').component
-renderAndText(panelComponent, {})
-await new Promise((r) => setTimeout(r, 10)) // 等 snapshot 取数落地
-const opened = renderAndText(panelComponent, {})
+const slotNames = slotSpecs.map((s) => s.spec.name)
+check('注册了输入区入口（1 枚「门店自查采集入口」）', slotSpecs.some((s) => s.spec.name === 'conversation.input.dock' && s.spec.label === '门店自查采集入口'), JSON.stringify(slotNames))
+check('注册了会话 header 入口', slotSpecs.some((s) => s.spec.name === 'conversation.session.header.actions'), JSON.stringify(slotNames))
+check('不再注册 shell.overlay（主界面不再用浮层）', !slotNames.includes('shell.overlay'), JSON.stringify(slotNames))
+check('不注册督导包的 sidebar.panellist / main', !slotNames.includes('sidebar.panellist') && !slotNames.includes('main'), JSON.stringify(slotNames))
+check('只注册两个会话侧挂载点（采集包边界）', slotNames.length === 2 && slotNames.every((n) => n === 'conversation.input.dock' || n === 'conversation.session.header.actions'), JSON.stringify(slotNames))
+check(
+  '源码不再留浮层外壳与浮层开关（不许留死代码路径）',
+  !/\.gicu-panel\s*\{|\.gicu-phone\s*\{|\.gicu-notch\s*\{/.test(clientCode) &&
+    clientCode.indexOf('gicu-phone') === -1 &&
+    clientCode.indexOf('gicu-notch') === -1 &&
+    clientCode.indexOf('panel.setOpen') === -1 &&
+    clientCode.indexOf('Escape') === -1 &&
+    clientCode.indexOf('const panel = {') === -1,
+  '',
+)
+
+// 通道契约（《实施契约》§2）
+const uiApi = globalThis.__gaia_inspection_ui__
+const viewApi = globalThis.__gaia_inspection_view__
+check('发布角色通道 __gaia_inspection_view__（getRole/setRole/subscribe）', Boolean(viewApi) && typeof viewApi.getRole === 'function' && typeof viewApi.setRole === 'function' && typeof viewApi.subscribe === 'function', Object.keys(viewApi || {}).join(','))
+check('发布屏组件通道 __gaia_inspection_ui__（version:1 + getScreen + subscribe）', Boolean(uiApi) && uiApi.version === 1 && typeof uiApi.getScreen === 'function' && typeof uiApi.subscribe === 'function', JSON.stringify(uiApi && { version: uiApi.version, getScreen: typeof uiApi.getScreen, subscribe: typeof uiApi.subscribe }))
+check('getScreen() 返回组件函数（= CaptureScreen）', typeof uiApi.getScreen() === 'function' && uiApi.getScreen() === test.CaptureScreen, typeof uiApi.getScreen())
+check('getScreen() 引用稳定（不换函数，否则外壳白重渲染）', uiApi.getScreen() === uiApi.getScreen(), '')
+let uiPinged = 0
+const uiUnsub = uiApi.subscribe(() => { uiPinged += 1 })
+test.exposeChannels()
+check('屏通道 subscribe 返回退订函数且能收到通知', typeof uiUnsub === 'function' && uiPinged === 1, String(uiPinged))
+uiUnsub()
+test.exposeChannels()
+check('屏通道退订后不再被通知', uiPinged === 1, String(uiPinged))
+
+// ── CSS：令牌 + 硬口径机检 ─────────────────────────────────────────────────
+const cssText = styleEls.map((el) => el.textContent).join('\n')
+check('样式已注入（<style data-plugin>）', cssText.indexOf('.gicu-root') !== -1, String(cssText.length))
+const TOKENS = [
+  '--gi-bg:#EEF0F4', '--gi-card:#FFFFFF', '--gi-ink:#101319', '--gi-ink-2:#5D6472', '--gi-ink-3:#8A909C', '--gi-line:#E2E5EB',
+  '--gi-accent:#1D4ED8', '--gi-dark:#161A20', '--gi-warn-bg:#FFF3E6', '--gi-warn-ink:#9A4A00',
+  '--gi-r-card:18px', '--gi-r-block:12px', '--gi-r-ctl:10px', '--gi-r-pill:999px',
+  '--gi-s1:4px', '--gi-s2:8px', '--gi-s3:12px', '--gi-s4:16px', '--gi-s6:24px', '--gi-s8:32px', '--gi-s10:40px',
+  '--gi-shadow-card:0 2px 8px rgba(16,19,25,.06)', '--gi-shadow-pop:0 10px 28px rgba(16,19,25,.18)',
+  '--gi-fs-title:20px', '--gi-fs-body:13px', '--gi-fs-aux:11px', '--gi-ease:cubic-bezier(.2,0,0,1)',
+]
+check('令牌与 §3.1 同名同值', TOKENS.every((token) => cssText.indexOf(token) !== -1), TOKENS.filter((t) => cssText.indexOf(t) === -1).join(' '))
+const radiusValues = (cssText.match(/border-radius:\s*([^;]+)/g) || []).map((v) => v.replace(/border-radius:\s*/, '').trim())
+check(
+  '圆角只有 18/12/10/999（其余走令牌）',
+  radiusValues.length > 0 && radiusValues.every((v) => /^var\(--gi-r-(card|block|ctl|pill)\)$/.test(v) || /^(18|12|10|999)px$/.test(v)),
+  radiusValues.join(' | '),
+)
+const spacingDecls = (cssText.match(/(?:padding|margin|margin-left|gap|row-gap|column-gap):\s*[^;]+/g) || []).map((v) => v.split(':')[1])
+const spacingNumbers = []
+for (const decl of spacingDecls) for (const num of decl.match(/\d+px/g) || []) spacingNumbers.push(Number(num.replace('px', '')))
+check('间距只用 4/8/12/16/24/32/40（其余走令牌）', spacingNumbers.every((n) => [0, 4, 8, 12, 16, 24, 32, 40].indexOf(n) !== -1), Array.from(new Set(spacingNumbers)).join(','))
+const fontSizes = (cssText.match(/font-size:\s*([^;]+)/g) || []).map((v) => v.replace(/font-size:\s*/, '').trim())
+check(
+  '字号只有三档（20/13/11；.gicu-root 内全走令牌，会话侧入口用同值字面量）',
+  fontSizes.length > 0 && fontSizes.every((v) => /^var\(--gi-fs-(title|body|aux)\)$/.test(v) || /^(20|13|11)px$/.test(v)),
+  Array.from(new Set(fontSizes)).join(' | '),
+)
+const shadows = (cssText.match(/box-shadow:\s*([^;]+)/g) || []).map((v) => v.replace(/box-shadow:\s*/, '').trim())
+const ringOnly = (value) => value.split(',').every((part) => /^(inset )?0 0 0 \d+px .+$/.test(part.trim()))
+check(
+  '阴影只有两级（其余 1px 圈一律 box-shadow 0 0 0 1px）',
+  shadows.length > 0 &&
+    shadows.every(
+      (v) =>
+        v === 'none' ||
+        v.indexOf('var(--gi-shadow') !== -1 ||
+        v.indexOf('0 2px 8px rgba(16,19,25,.06)') !== -1 ||
+        v.indexOf('0 10px 28px rgba(16,19,25,.18)') !== -1 ||
+        ringOnly(v),
+    ),
+  shadows.join(' | '),
+)
+check('按钮 ≥44px 且左右内边距 ≥16px', cssText.indexOf('min-height:44px') !== -1 && cssText.indexOf('padding:0 var(--gi-s4)') !== -1, '')
+check('按下反馈 scale:.96（不得更小）', cssText.indexOf('scale:.96') !== -1, '')
+check('四态齐全（hover / active / focus-visible / disabled）', [':hover', ':active', ':focus-visible', '[disabled]'].every((state) => cssText.indexOf(state) !== -1), '')
+check('禁用态一律灰化（不保留品牌色）', cssText.indexOf('.gicu-btn.primary[disabled]') !== -1 && cssText.indexOf('.gicu-btn[disabled]') !== -1, '')
+check('动效写属性名（transition-property）且无 transition: all', cssText.indexOf('transition-property') !== -1 && cssText.indexOf('transition: all') === -1, '')
+check('prefers-reduced-motion 降级', cssText.indexOf('prefers-reduced-motion') !== -1, '')
+check('动态数字 tabular-nums（.gicu-num）', cssText.indexOf('tabular-nums') !== -1 && cssText.indexOf('.gicu-num') !== -1, '')
+check('图片 outline 是纯黑 10% + offset -1px', cssText.indexOf('outline:1px solid rgba(0,0,0,.1)') !== -1 && cssText.indexOf('outline-offset:-1px') !== -1, '')
+const blackUsages = cssText.match(/rgba\(0,0,0,[^)]*\)/g) || []
+check('除图片 1px 纯黑 10% 外不用纯黑', blackUsages.every((v) => v === 'rgba(0,0,0,.1)') && cssText.indexOf('#000') === -1, blackUsages.join(','))
+check('文案排版 text-wrap（标题 balance / 正文 pretty）', cssText.indexOf('text-wrap:balance') !== -1 && cssText.indexOf('text-wrap:pretty') !== -1, '')
+check('滚动条细且无彩色', cssText.indexOf('scrollbar-width:thin') !== -1 && cssText.indexOf('scrollbar-color:#C7CCD6 transparent') !== -1, '')
+const NEW_CLASSES = ['gicu-root', 'gicu-screen', 'gicu-hero', 'gicu-form', 'gicu-banner', 'gicu-count', 'gicu-row', 'gicu-lbl', 'gicu-btn', 'gicu-dockbtn', 'gicu-input', 'gicu-note', 'gicu-select', 'gicu-num', 'gicu-state', 'gicu-skel', 'gicu-line', 'gicu-chip', 'gicu-actions', 'gicu-grow', 'gicu-scroll']
+check('§4 类名齐备', NEW_CLASSES.every((cls) => cssText.indexOf('.' + cls) !== -1), NEW_CLASSES.filter((c) => cssText.indexOf('.' + c) === -1).join(' '))
+const DEAD_CLASSES = ['gicu-panel', 'gicu-phone', 'gicu-notch', 'gicu-body', 'gicu-seg', 'gicu-tabs', 'gicu-drop', 'gicu-photo', 'gicu-ta', 'gicu-retry', 'gicu-off', 'gicu-inline']
+check('旧浮层/手机壳类名已清空', DEAD_CLASSES.every((cls) => cssText.indexOf(cls) === -1), DEAD_CLASSES.filter((c) => cssText.indexOf(c) !== -1).join(' '))
+
+// ── 渲染屏 A（整屏两栏）───────────────────────────────────────────────────
+const capture = uiApi.getScreen()
+renderAndText(capture, {})
+await sleep(10) // 等 snapshot 取数落地
+const opened = renderAndText(capture, {})
 const panelText = opened.text
 
-check('屏 A 出现视图标签「店长端」「督导端」', panelText.includes('店长端') && panelText.includes('督导端'), panelText.slice(0, 120))
+check('屏 A 根容器自带 .gicu-root（自声明令牌，可独立存活）', findByClass(opened.tree, 'gicu-root').length === 1, String(findByClass(opened.tree, 'gicu-root').length))
+check('屏 A 是整屏两栏：.gicu-screen 里 .gicu-hero（左）+ .gicu-form（右）', findByClass(opened.tree, 'gicu-screen').length === 1 && findByClass(opened.tree, 'gicu-hero').length === 1 && findByClass(opened.tree, 'gicu-form').length === 1, '')
+check('屏 A 不再有手机壳浮层（.gicu-panel/.gicu-phone/.gicu-notch 均不存在）', DEAD_CLASSES.every((cls) => findByClass(opened.tree, cls).length === 0), '')
+check('屏 A 不自画角色切换段控件（由外壳统一提供）', findByClass(opened.tree, 'gicu-seg').length === 0 && panelText.indexOf('督导端') === -1, '')
 check('屏 A 保留「演示替身」提示条（不能删的文案）', panelText.includes('演示替身：真实场景中门店在手机上提交，本面板为演示视图'), '')
-check('屏 A 门店下拉含两家示例门店（画面级文案）', panelText.includes('示例门店 A · 快餐档口') && panelText.includes('示例门店 B · 正餐堂食'), panelText.slice(0, 220))
+check('屏 A 门店下拉含两家示例门店（画面级文案逐字）', panelText.includes('示例门店 A · 快餐档口') && panelText.includes('示例门店 B · 正餐堂食'), panelText.slice(0, 220))
 check('屏 A 照片区文案为「点击选择照片，或把图片拖到这里」+ jpg/png 单张', panelText.includes('点击选择照片，或把图片拖到这里') && panelText.includes('支持 jpg / png，单张'), '')
-check('屏 A 一句话说明含示例占位文案与实时字数 0 / 200', panelText.includes('接班时拍的，后门那堆货还没清，上一个班次留下的') && panelText.includes('0 / 200 字'), '')
+check('屏 A 一句话说明含示例占位文案与实时字数 0 / 200 字', panelText.includes('接班时拍的，后门那堆货还没清，上一个班次留下的') && panelText.includes('0 / 200 字'), '')
 check('屏 A 有 [载入示例] 与 [提交并分析]', panelText.includes('载入示例') && panelText.includes('提交并分析'), '')
-check('屏 A 空态状态行逐字', panelText.includes('待提交（照片与文字都填写后按钮可用）'), '')
+check('屏 A 五态·待提交状态行逐字（data-kind=idle）', panelText.includes('待提交（照片与文字都填写后按钮可用）') && stateLineOf(opened.tree) !== null && stateLineOf(opened.tree).props['data-kind'] === 'idle', JSON.stringify(stateLineOf(opened.tree) && stateLineOf(opened.tree).props))
+check('照片投放区是本屏视觉主角（.gicu-hero 里是整块投放区按钮）', findByClass(opened.tree, 'drop').length === 1 && findByClass(opened.tree, 'drop')[0].tag === 'button', '')
+check('字数用 tabular-nums（.gicu-num）', findByClass(opened.tree, 'gicu-count').some((n) => String(n.props.className).indexOf('gicu-num') !== -1), '')
+const textWithoutStoreLabels = panelText.split('示例门店 A · 快餐档口').join('').split('示例门店 B · 正餐堂食').join('')
+check('不再用 `·` 拼元数据（既有门店下拉文案除外）', textWithoutStoreLabels.indexOf('·') === -1, textWithoutStoreLabels.slice(0, 200))
+check('按钮文字不带 `→`', panelText.indexOf('→') === -1 && findAll(opened.tree, 'button').every((b) => vnodeText(b).indexOf('→') === -1), '')
 
 const emptySubmit = buttonByLabel(opened.tree, '提交并分析')
 check('空表单时「提交并分析」不可用', Boolean(emptySubmit) && emptySubmit.props.disabled === true, JSON.stringify(emptySubmit && emptySubmit.props.disabled))
+
+// ── 三态（门店下拉这个数据面：加载中 / 空 / 失败）──────────────────────────
+const savedSnapshotData = test.snapshotSource.data
+test.snapshotSource.data = null
+test.snapshotSource.failure = ''
+test.snapshotSource.notify()
+const loadingTree = renderAndText(capture, {})
+check('三态·加载中：骨架 + 说明（不留白屏）', findByClass(loadingTree.tree, 'gicu-skel').length > 0 && loadingTree.text.includes('正在读取门店列表…'), loadingTree.text.slice(0, 160))
+
+test.snapshotSource.data = null
+test.snapshotSource.failure = '看板后端未就绪（路由 404）'
+test.snapshotSource.notify()
+const failedTree = renderAndText(capture, {})
+check('三态·失败：给出原因 + 重试按钮', failedTree.text.includes('门店列表不可用') && failedTree.text.includes('看板后端未就绪（路由 404）') && Boolean(buttonByLabel(failedTree.tree, '重试')), failedTree.text.slice(0, 200))
+
+test.snapshotSource.data = { stores: [], inspections: [] }
+test.snapshotSource.failure = ''
+test.snapshotSource.notify()
+const emptyTree = renderAndText(capture, {})
+check('三态·空：居中提示 + 下一步动作（重试）', emptyTree.text.includes('门店列表为空') && Boolean(buttonByLabel(emptyTree.tree, '重试')), emptyTree.text.slice(0, 200))
+
+test.snapshotSource.data = savedSnapshotData
+test.snapshotSource.failure = ''
+test.snapshotSource.notify()
+const restored = renderAndText(capture, {})
+check('三态恢复：门店下拉回到两家示例门店（状态可复现）', restored.text.includes('示例门店 A · 快餐档口') && findByClass(restored.tree, 'gicu-select').length === 1, restored.text.slice(0, 160))
 
 check('只收 jpg/png：png·jpg 通过，gif·无后缀拒绝', test.isAcceptedImage('a.png', 'image/png') === true && test.isAcceptedImage('a.jpg', 'image/jpeg') === true && test.isAcceptedImage('a.gif', 'image/gif') === false && test.isAcceptedImage('a', '') === false, '')
 check('采集面只收单张（MAX_PHOTOS = 1，与后端 MAX_PHOTOS_SUBMIT 对齐）', test.MAX_PHOTOS === 1, String(test.MAX_PHOTOS))
@@ -361,28 +510,30 @@ check('单张上限 2MB（与后端 MAX_PHOTO_BYTES 对齐）', test.MAX_PHOTO_B
 check('一句话上限 200 字', test.NOTE_MAX === 200, String(test.NOTE_MAX))
 
 // 载入示例 → 真实提交 → 成功态
-const loadBtn = buttonByLabel(opened.tree, '载入示例')
+const loadBtn = buttonByLabel(restored.tree, '载入示例')
 let loadError = ''
 try {
   await loadBtn.props.onClick()
-  await new Promise((r) => setTimeout(r, 10))
+  await sleep(10)
 } catch (error) {
   loadError = String((error && error.message) || error)
 }
 const sampleReq = requests.find((r) => r.path.indexOf('/sample-photo') !== -1)
 check('「载入示例」从后端取内置示例图（真取数，不写死）', !loadError && Boolean(sampleReq), loadError || JSON.stringify(sampleReq))
-const afterSample = renderAndText(panelComponent, {})
+const afterSample = renderAndText(capture, {})
 check('载入示例后照片区显示文件名与合成标注', afterSample.text.includes('sample-issue.png') && afterSample.text.includes('合成示例图'), afterSample.text.slice(0, 240))
+check('载入示例后文件名与体积分列（不再用 `·` 拼）', findByClass(afterSample.tree, 'nm').length === 1 && findByClass(afterSample.tree, 'gicu-chip').some((n) => String(n.props.className).indexOf('gicu-num') !== -1), '')
 check('载入示例后一句话被填入（仍须真实调用模型）', afterSample.text.includes('接班时拍的，后门那堆货还没清，上一个班次留下的'), '')
+check('选中后是大图预览 + 删除按钮', findByClass(afterSample.tree, 'frame').length === 1 && Boolean(buttonByLabel(afterSample.tree, '删除')), '')
 const readySubmit = buttonByLabel(afterSample.tree, '提交并分析')
 check('照片与文字齐备后「提交并分析」可用', Boolean(readySubmit) && readySubmit.props.disabled === false, JSON.stringify(readySubmit && readySubmit.props.disabled))
 
 // 后端的示例图口不存在时 → 退回前端内置示例图（不硬依赖后端口）
 sampleAvailable = false
-const loadBtnAgain = buttonByLabel(renderAndText(panelComponent, {}).tree, '载入示例')
+const loadBtnAgain = buttonByLabel(renderAndText(capture, {}).tree, '载入示例')
 await loadBtnAgain.props.onClick()
 await sleep(10)
-const fallbackText = renderAndText(panelComponent, {}).text
+const fallbackText = renderAndText(capture, {}).text
 check('示例图口 404 时退回前端内置示例图（不必占后端口）', fallbackText.includes('内置合成示例图') && fallbackText.includes('后端的示例图口暂不可用'), fallbackText.slice(0, 260))
 check('内置示例图确实由 Canvas 合成（几何图形画法被调用）', canvasShim.calls.length > 0 && canvasShim.calls.some((c) => c.fn === 'fillRect'), String(canvasShim.calls.length))
 check('载入示例后一句话仍被填入（真实调用模型不写死结果）', fallbackText.includes(test.SAMPLE_NOTE), '')
@@ -395,12 +546,13 @@ test.submitState.lastStoreId = ''
 const beforeCount = requests.filter((r) => r.path.indexOf('/submit') !== -1 && r.path.indexOf('report') === -1).length
 const samplePhoto = { name: 'sample-issue.png', size: 12345, mediaType: 'image/png', file: null, dataUrl: 'data:image/png;base64,' + SAMPLE_BYTES }
 await test.submitSelfCheck({ storeId: 'S-001', note: test.SAMPLE_NOTE, photos: [samplePhoto] })
-await new Promise((r) => setTimeout(r, 10))
+await sleep(10)
 const submitReqs = requests.filter((r) => r.path.indexOf('/submit') !== -1 && r.path.indexOf('report') === -1)
 const submitReq = submitReqs[submitReqs.length - 1]
 check('「提交并分析」走 POST /api/gaia-inspection/submit', submitReqs.length === beforeCount + 1 && submitReq.method === 'POST', JSON.stringify(submitReq && submitReq.path))
 check('提交体含 storeId / note / photos[{name,mediaType,dataBase64}]（单张）', Boolean(submitReq && submitReq.body && submitReq.body.storeId === 'S-001' && Array.isArray(submitReq.body.photos) && submitReq.body.photos.length === 1 && submitReq.body.photos[0].mediaType === 'image/png'), JSON.stringify(submitReq && submitReq.body))
-check('成功态状态行逐字（含编号 #ab12）', renderAndText(panelComponent, {}).text.includes('已提交，编号 #ab12，等待督导复核'), '')
+const doneTree = renderAndText(capture, {})
+check('五态·成功：状态行逐字（含编号 #ab12）+ data-kind=ok', doneTree.text.includes('已提交，编号 #ab12，等待督导复核') && stateLineOf(doneTree.tree).props['data-kind'] === 'ok', JSON.stringify(stateLineOf(doneTree.tree).props))
 check('提交后回执回报给宿主半内省口', requests.some((r) => r.path.indexOf('/report-submit') !== -1), '')
 
 // ── 回归：useSyncExternalStore 的快照必须换引用 ─────────────────────────────
@@ -413,13 +565,7 @@ check(
   '',
 )
 
-test.panel.setOpen(false)
-renderAndText(panelComponent, {})
-test.panel.setOpen(true)
-const openedByStore = flushStoreDriven(panelComponent)
-check('回归：采集面只靠 store 通知就重渲染出来（getSnapshot 换引用）', Boolean(openedByStore) && openedByStore.text.indexOf('提交并分析') !== -1, openedByStore ? '' : 'store 通知后订阅者未被标脏 → React 不会重渲染')
-
-// 提交中：按钮必须变「正在分析…」（同样只靠 store 通知驱动，不手动重挂）
+// 提交中：状态行必须变「正在分析…」（只靠 store 通知驱动，不手动重挂）
 const realFetch = globalThis.fetch
 let releaseSubmit = null
 globalThis.fetch = async (url, options) => {
@@ -427,15 +573,17 @@ globalThis.fetch = async (url, options) => {
   return realFetch(url, options)
 }
 test.submitState.lastSubmittedAt = 0
+renderAndText(capture, {})
 const inFlight = test.submitSelfCheck({ storeId: 'S-001', note: test.SAMPLE_NOTE, photos: [samplePhoto] })
 for (let i = 0; i < 50 && !releaseSubmit; i += 1) await sleep(10)
-const busyDriven = flushStoreDriven(panelComponent)
-check('回归：提交中按钮变「正在分析…」（store 通知驱动重渲染）', Boolean(busyDriven) && busyDriven.text.indexOf('正在分析…') !== -1, busyDriven ? busyDriven.text.slice(0, 160) : '未重渲染')
+const busyDriven = flushStoreDriven(capture, {})
+check('回归：提交中状态行/按钮变「正在分析…」（store 通知驱动重渲染）', Boolean(busyDriven) && busyDriven.text.indexOf('正在分析…') !== -1, busyDriven ? busyDriven.text.slice(0, 160) : '未重渲染')
+check('五态·分析中：data-kind=running', Boolean(busyDriven) && stateLineOf(busyDriven.tree) !== null && stateLineOf(busyDriven.tree).props['data-kind'] === 'running', busyDriven ? JSON.stringify(stateLineOf(busyDriven.tree).props) : '未重渲染')
 if (releaseSubmit) releaseSubmit()
 await inFlight
 await sleep(20)
-const doneDriven = flushStoreDriven(panelComponent)
-check('回归：提交成功状态行出「已提交，编号 #ab12」', Boolean(doneDriven) && doneDriven.text.indexOf('已提交，编号 #ab12') !== -1, doneDriven ? doneDriven.text.slice(0, 160) : '未重渲染')
+const doneDriven = flushStoreDriven(capture, {})
+check('回归：提交成功状态行出「已提交，编号 #ab12」（只靠 store 通知）', Boolean(doneDriven) && doneDriven.text.indexOf('已提交，编号 #ab12') !== -1, doneDriven ? doneDriven.text.slice(0, 160) : '未重渲染')
 globalThis.fetch = realFetch
 const snapBefore = test.snapshotSource.snapshot
 await test.pullSnapshot()
@@ -445,9 +593,10 @@ check('回归：snapshotSource 在 notify 后换快照引用（门店下拉 / �
 submitOverride = { ok: false, status: 'failed', summary: '模型不可用', error: { code: 'NO_PROVIDER', message: '宿主 llm 服务不可用：请先在模型设置里配置 provider' } }
 test.submitState.lastSubmittedAt = 0
 await test.submitSelfCheck({ storeId: 'S-001', note: test.SAMPLE_NOTE, photos: [samplePhoto] })
-await new Promise((r) => setTimeout(r, 10))
-const failedText = renderAndText(panelComponent, {}).text
-check('失败态状态行形如「分析失败：<原因摘要> [重试]」', failedText.indexOf('分析失败：') !== -1 && failedText.indexOf('宿主 llm 服务不可用') !== -1 && failedText.indexOf('重试') !== -1, failedText.slice(0, 260))
+await sleep(10)
+const failedSubmit = renderAndText(capture, {})
+const failedText = failedSubmit.text
+check('五态·失败：状态行形如「分析失败：<原因摘要> [重试]」+ data-kind=bad', failedText.indexOf('分析失败：') !== -1 && failedText.indexOf('宿主 llm 服务不可用') !== -1 && failedText.indexOf('重试') !== -1 && stateLineOf(failedSubmit.tree).props['data-kind'] === 'bad', failedText.slice(0, 260))
 check('失败时输入与照片保留（不清空）', failedText.includes(test.SAMPLE_NOTE) && failedText.includes('sample-issue.png'), '')
 submitOverride = null
 
@@ -457,13 +606,14 @@ await test.pullSnapshot()
 test.submitState.lastSubmittedAt = 0
 submitOverride = { ok: true, runId: 'Q-1', status: 'queued', summary: '离线：仅采集排队，不产生模型判断；联网后自动补判', data: { offline: true, accepted: 1, modelCallsAdded: 0 } }
 await test.submitSelfCheck({ storeId: 'S-001', note: '离线时提交', photos: [samplePhoto] })
-await new Promise((r) => setTimeout(r, 10))
-check('断网态状态行含不能删的离线文案', renderAndText(panelComponent, {}).text.includes('离线：仅采集排队，不产生模型判断；联网后自动补判'), '')
+await sleep(10)
+const offlineTree = renderAndText(capture, {})
+check('五态·离线：状态行含不能删的离线文案 + data-kind=off', offlineTree.text.includes('离线：仅采集排队，不产生模型判断；联网后自动补判') && stateLineOf(offlineTree.tree).props['data-kind'] === 'off', JSON.stringify(stateLineOf(offlineTree.tree).props))
 
 // 断网恢复
 snapshotOverride = { ...SNAPSHOT, offline: { offline: false, source: 'capture' }, pendingQueue: { pending: 2, judged: 0, items: [] } }
 await test.pullSnapshot()
-check('断网恢复状态行「已联网，正在补判排队中的 N 条…」', renderAndText(panelComponent, {}).text.indexOf('已联网，正在补判排队中的 2 条…') !== -1, '')
+check('断网恢复状态行「已联网，正在补判排队中的 N 条…」', renderAndText(capture, {}).text.indexOf('已联网，正在补判排队中的 2 条…') !== -1, '')
 
 // 同一门店不允许重复提交未完成的分析
 const lockReason = test.busyReasonOf({ inspections: [{ id: 'INS-X', storeId: 'S-001', status: 'analyzing' }] }, 'S-001', Date.now())
@@ -472,16 +622,46 @@ test.submitState.lastStoreId = 'S-001'
 test.submitState.lastSubmittedAt = Date.now()
 check('刚提交过 60s 内同门店再提交被拦', test.busyReasonOf({ inspections: [] }, 'S-001', Date.now()).indexOf('不允许重复提交') !== -1, test.busyReasonOf({ inspections: [] }, 'S-001', Date.now()))
 check('其它门店不受影响', test.busyReasonOf({ inspections: [] }, 'S-002', Date.now()) === '', test.busyReasonOf({ inspections: [] }, 'S-002', Date.now()))
-
-// 角色视图切换（本地状态，无登录）
-test.localView.setRole('supervisor')
-check('角色可切到督导端（本地视图状态）', test.localView.role === 'supervisor' && test.localView.roleLabel() === '督导端', test.localView.role)
-test.localView.setRole('manager')
-check('角色可切回店长端', test.localView.role === 'manager' && test.localView.roleLabel() === '店长端', test.localView.role)
-check('视图通道已发布（跨包共享，不含登录态）', typeof globalThis.__gaia_inspection_view__.getRole === 'function', '')
-test.panel.setOpen(false)
 snapshotOverride = null
-submitOverride = null
+
+// ── 入口：点了必须有肉眼可见变化；督导包没装载必须给可见提示 ────────────────
+const dockComponent = slotSpecs.find((s) => s.spec.name === 'conversation.input.dock').component
+const headerComponent = slotSpecs.find((s) => s.spec.name === 'conversation.session.header.actions').component
+check('输入区入口是组件（1 枚按钮 + 提示），header 入口同源', typeof dockComponent === 'function' && typeof headerComponent === 'function', dockComponent.name + '/' + headerComponent.name)
+
+delete globalThis.__gaia_inspection_shell__
+test.shellBridge.sync()
+test.localView.setRole('supervisor')
+const missingShell = renderAndText(dockComponent, {})
+const missingBtn = buttonByLabel(missingShell.tree, '门店自查采集入口')
+check('督导包未装载：按钮旁有可见内联提示（不留点了没反应的按钮）', missingShell.text.includes('巡店自查面板未装载（gaia-inspection-oversight-ui）') && Boolean(missingBtn), missingShell.text.slice(0, 160))
+missingBtn.props.onClick()
+check('未装载时点入口仍写入店长端角色（不是死按钮）', test.localView.role === 'manager', test.localView.role)
+
+const shellCalls = []
+globalThis.__gaia_inspection_shell__ = { version: 1, open: (view) => shellCalls.push(view), subscribe: () => () => {} }
+test.shellBridge.sync()
+test.localView.setRole('supervisor')
+const readyShell = renderAndText(dockComponent, {})
+check('督导包装载后提示消失', readyShell.text.indexOf('未装载') === -1, readyShell.text.slice(0, 120))
+const openBtn = buttonByLabel(readyShell.tree, '门店自查采集入口')
+openBtn.props.onClick()
+check('点入口 → 切店长端 + 请外壳 open("board")（肉眼可见变化）', test.localView.role === 'manager' && shellCalls.length === 1 && shellCalls[0] === 'board', JSON.stringify(shellCalls))
+
+// 离线时 dock 保留离线提示 chip（说明 §4 屏 A）
+snapshotOverride = { ...SNAPSHOT, offline: { offline: true, source: 'capture' }, pendingQueue: { pending: 2, judged: 0, items: [] } }
+await test.pullSnapshot()
+const offlineDock = renderAndText(dockComponent, {})
+check('离线时 dock 保留「离线：仅采集排队，不产生模型判断」提示 chip', offlineDock.text.includes('离线：仅采集排队，不产生模型判断'), offlineDock.text.slice(0, 160))
+snapshotOverride = null
+await test.pullSnapshot()
+
+// 角色通道（本地状态，无登录）
+test.localView.setRole('supervisor')
+check('角色可切到督导端（本地视图状态）', test.localView.role === 'supervisor' && test.localView.roleLabel() === '督导端' && globalThis.__gaia_inspection_view__.getRole() === 'supervisor', test.localView.role)
+test.localView.setRole('manager')
+check('角色可切回店长端（角色通道是唯一真源）', test.localView.role === 'manager' && test.localView.roleLabel() === '店长端' && globalThis.__gaia_inspection_view__.getRole() === 'manager', test.localView.role)
+check('角色通道还提供 subscribe（跨包共享，不含登录态）', typeof globalThis.__gaia_inspection_view__.subscribe === 'function', '')
 
 // ── ④ keywords ────────────────────────────────────────────────────────────
 const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
@@ -489,7 +669,7 @@ const wanted = ['门店自查采集入口', '角色视图切换']
 check('manifest.keywords 逐字包含两个能力词', wanted.every((word) => manifest.keywords.includes(word)), JSON.stringify(manifest.keywords))
 check('manifest.keywords 不含别的订单词', manifest.keywords.every((word) => ['科研综述自审', '自审链路看板', '溯源查看面板', '巡店判断回放看板', '证据挂图卡片', '立即扫描按钮', '模型调用日志面板'].indexOf(word) === -1), JSON.stringify(manifest.keywords))
 
-// ── ⑤ 纯函数 ──────────────────────────────────────────────────────────────
+// ── ⑤ 纯函数（逻辑层不变量）───────────────────────────────────────────────
 const split = test.splitDataUrl('data:image/png;base64,AAAA')
 check('splitDataUrl 正确拆分', split && split.mediaType === 'image/png' && split.dataBase64 === 'AAAA', JSON.stringify(split))
 check('splitDataUrl 对非法输入返回 null', test.splitDataUrl('not-a-data-url') === null, '')

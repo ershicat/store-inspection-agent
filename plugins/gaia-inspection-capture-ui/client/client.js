@@ -1,18 +1,27 @@
 // gaia-inspection-capture-ui — 客户端半（纯浏览器 ESM，手写 ModuleLoader bundle）。
 //
-// 逐字对齐《界面实现说明（画面级）》屏 A · 店长端（采集）：
-//   顶部 视图标签（店长端 / 督导端）→ 浅橙提示条「演示替身：真实场景中门店在手机上提交，本面板为演示视图」
-//   → 门店下拉（示例门店 A · 快餐档口 / 示例门店 B · 正餐堂食）→ 照片区（点击或拖入，**只收 jpg/png、单张**，
-//   选中后显示缩略图 + 文件名 + 可删除，**不调用摄像头**）→ 一句话说明（1–200 字 + 实时字数）
-//   → [载入示例] [提交并分析] → 状态行（五态逐字）。
+// 逐字对齐《界面实现说明（画面级）》屏 A · 店长端（采集）；形态按《实施契约》§3.5 重做为**整屏两栏**
+// （去掉旧的遮罩浮层 + 手机形状卡片外壳，本文件里已无相关类名与开关）：
+//   左 = 照片投放区（本屏视觉主角：更大的投放区；选中后大图预览 + 文件名 + 删除）
+//   → 右 = 表单（橙底提示条「演示替身：真实场景中门店在手机上提交，本面板为演示视图」→ 门店下拉
+//   （示例门店 A · 快餐档口 / 示例门店 B · 正餐堂食）→ 一句话说明（1–200 字 + 实时字数）
+//   → [载入示例] [提交并分析] → 五态状态行逐字）。
+//   屏标题、副标题与「角色视图切换」由督导包外壳（InspectionApp）统一提供，本组件不自画（同一容器规格）。
 //
-// 能力词（逐字）：「门店自查采集入口」（C 档）、「角色视图切换」（E 档）。
+// 能力词（逐字）：「门店自查采集入口」（C 档）、「角色视图切换」（E 档；本包只发布角色通道，切换控件在外壳）。
+//
+// 挂载与通道（《实施契约》§2）：
+//   · conversation.input.dock + conversation.session.header.actions：各 1 枚「门店自查采集入口」；
+//     督导包（外壳）未装载时按钮旁内联可见提示，**不留点了没反应的按钮**。
+//   · globalThis.__gaia_inspection_view__：{getRole, setRole, subscribe} —— 角色的唯一真源（含 localStorage 记忆）。
+//   · globalThis.__gaia_inspection_ui__：{version:1, getScreen, subscribe} —— 店长端屏组件通道，供外壳内嵌。
+//   · 不注册 shell.overlay / sidebar.panellist / main（主面板 key 归督导包）。
 //
 // 纪律：
 //   · 纯浏览器 ESM：不引 node: 内置模块；React 由宿主模块表提供（拿不到就不挂载，不报错）。
 //   · 提交走 POST /api/gaia-inspection/submit（后端真分析，**前端不做假回执、不写死结果**）。
 //   · 离线/待判信号取 GET /api/gaia-inspection/snapshot 的 offline / pendingQueue；读不到就说"未知"，不假装在线。
-//   · 不做美术层、不做登录/权限、不做门店增删改、不做勾选表、不做响应式（"手机形状卡片"只是桌面上的视觉形态）。
+//   · 不做美术层、不做登录/权限、不做门店增删改、不做勾选表、不做响应式。
 
 window.__ModuleLoader__.load({
   id: 'gaia-inspection-capture-ui',
@@ -51,6 +60,8 @@ window.__ModuleLoader__.load({
 
     /** 五态状态行逐字文案。 */
     const STATE_EMPTY = '待提交（照片与文字都填写后按钮可用）'
+    /** 材料齐、按钮可点时的同一态文案：旧的括号提示此时自相矛盾（按钮已经可用了）。 */
+    const STATE_READY = '待提交（材料已齐，点「提交并分析」）'
     const STATE_RUNNING = '正在分析…（本次为真实模型调用）'
 
     const SAMPLE_NOTE = '接班时拍的，后门那堆货还没清，上一个班次留下的'
@@ -64,52 +75,222 @@ window.__ModuleLoader__.load({
     const ROLE_SUPERVISOR = 'supervisor'
     const ROLE_STORAGE_KEY = 'gaia-inspection.view-role'
     const VIEW_CHANNEL = '__gaia_inspection_view__'
+    /** 店长端屏（CaptureScreen）的组件通道：督导包外壳用 getScreen() 取组件内嵌（《实施契约》§2）。 */
+    const UI_CHANNEL = '__gaia_inspection_ui__'
+    /** 督导包发布的外壳通道：本包入口用它「切到主面板」；不存在 = 督导包没装载（必须给出可见提示）。 */
+    const SHELL_CHANNEL = '__gaia_inspection_shell__'
+    const SHELL_MISSING_NOTICE = '巡店自查面板未装载（gaia-inspection-oversight-ui）'
 
-    /** 采集面与角色切换都挂在输入区（说明要求顶部两个视图标签；输入区就在会话顶部，且切面板时始终可见）。 */
+    /** 两枚入口都挂在会话侧（输入区 / 会话 header）：点了切店长端并请外壳打开主面板。 */
     const DOCK_SLOT = 'conversation.input.dock'
     const HEADER_SLOT = 'conversation.session.header.actions'
 
+    /**
+     * 样式层（《实施契约》§3.1 令牌 + §3.2 硬口径 + §4 类名；本包自声明、不依赖另一个包）。
+     *   · 圆角只有四个值：卡片 18 / 内部块 12 / 按钮与输入框 10 / 胶囊 999；**嵌套同心：外 = 内 + 内边距**。
+     *     落地口径——含 10px 控件的卡片内边距取 8（18 = 10 + 8）；纯文字块不产生嵌套圆角，可用 12/16 内边距。
+     *   · 间距只用 4/8/12/16/24/32/40；字号只有三档 20/13/11。
+     *   · 阴影只有两级、一律 rgba 透明黑；按钮/卡片/控件的 1px 圈一律用 box-shadow 画（边框只表达结构与状态）。
+     *   · 动效一律 transition-property 写全属性名（禁止 transition: all），150–200ms ease-out，并有 reduced-motion 降级。
+     */
     const CSS = `
-.gicu-dock { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.gicu-lbl { font-size: 11px; color: #8a9099; }
-.gicu-seg { display: inline-flex; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 999px; overflow: hidden; }
-.gicu-seg button { border: 0; background: transparent; color: inherit; font-size: 11px; padding: 2px 11px; cursor: pointer; }
-.gicu-seg button[data-on="1"] { background: var(--dsw-color-primary, #4e6ef2); color: #fff; }
-.gicu-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 6px; padding: 4px 12px; font: inherit; font-size: 12px; cursor: pointer; background: transparent; color: inherit; }
-.gicu-btn:hover:not([disabled]) { border-color: var(--dsw-color-primary, #4e6ef2); color: var(--dsw-color-primary, #4e6ef2); }
-.gicu-btn[disabled] { opacity: .5; cursor: not-allowed; }
-.gicu-btn.primary { border-color: var(--dsw-color-primary, #4e6ef2); color: var(--dsw-color-primary, #4e6ef2); }
-.gicu-off { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #ffe58f; background: rgba(255,229,143,.16); color: #ad6800; border-radius: 999px; padding: 2px 9px; font-size: 11px; }
-.gicu-panel { position: absolute; inset: 0; z-index: 30; background: rgba(20,24,32,.22); display: flex; align-items: flex-start; justify-content: center; padding: 22px 12px; overflow-y: auto; box-sizing: border-box; }
-.gicu-phone { width: min(430px, 94vw); background: var(--dsw-color-bg, #fff); color: var(--dsw-color-fg, #1f2329); border-radius: 20px; box-shadow: 0 14px 44px rgba(0,0,0,.30); border: 1px solid var(--dsw-color-border, #e5e6eb); display: flex; flex-direction: column; }
-.gicu-notch { height: 22px; border-radius: 20px 20px 0 0; background: linear-gradient(90deg, rgba(78,110,242,.10), rgba(78,110,242,.02)); display: flex; align-items: center; justify-content: center; font-size: 10px; color: #8a9099; letter-spacing: .04em; }
-.gicu-body { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 9px; font-size: 12px; }
-.gicu-tabs { display: inline-flex; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 999px; overflow: hidden; align-self: flex-start; }
-.gicu-tabs button { border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; padding: 3px 12px; cursor: pointer; }
-.gicu-tabs button[data-on="1"] { background: var(--dsw-color-primary, #4e6ef2); color: #fff; }
-.gicu-banner { border: 1px solid #ffd591; background: #fff7e6; color: #ad4e00; border-radius: 8px; padding: 6px 9px; font-size: 11px; line-height: 1.5; }
-.gicu-row { display: flex; align-items: center; gap: 8px; }
-.gicu-select { flex: 1; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 12px; background: transparent; color: inherit; }
-.gicu-drop { border: 1px dashed var(--dsw-color-border, #e5e6eb); border-radius: 12px; padding: 18px 12px; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #8a9099; background: var(--dsw-color-bg-2, #f7f8fa); text-align: center; cursor: pointer; }
-.gicu-drop[data-over="1"] { border-color: var(--dsw-color-primary, #4e6ef2); color: var(--dsw-color-primary, #4e6ef2); }
-.gicu-drop .cam { font-size: 22px; line-height: 1; }
-.gicu-drop .t1 { font-size: 12px; color: inherit; }
-.gicu-drop .t2 { font-size: 10px; }
-.gicu-photo { display: flex; align-items: center; gap: 9px; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 10px; padding: 7px; }
-.gicu-photo img { width: 62px; height: 62px; object-fit: cover; border-radius: 8px; flex: none; background: #000; }
-.gicu-photo .nm { flex: 1; min-width: 0; font-size: 11px; word-break: break-all; }
-.gicu-photo .del { border: 1px solid var(--dsw-color-border, #e5e6eb); background: transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; color: inherit; font-size: 11px; }
-.gicu-ta { width: 100%; min-height: 64px; resize: vertical; box-sizing: border-box; border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 12px; color: inherit; background: transparent; }
-.gicu-count { font-size: 10px; color: #8a9099; text-align: right; }
-.gicu-actions { display: flex; align-items: center; gap: 8px; }
-.gicu-actions .grow { flex: 1; }
-.gicu-state { border: 1px solid var(--dsw-color-border, #e5e6eb); border-radius: 8px; padding: 6px 9px; font-size: 11px; line-height: 1.6; color: #646a73; word-break: break-word; }
-.gicu-state[data-kind="running"] { border-color: #91caff; background: rgba(145,202,255,.10); color: #0958d9; }
-.gicu-state[data-kind="ok"] { border-color: #b7eb8f; background: rgba(183,235,143,.14); color: #237804; }
-.gicu-state[data-kind="bad"] { border-color: #ffccc7; background: rgba(255,204,199,.14); color: #cf1322; }
-.gicu-state[data-kind="off"] { border-color: #ffd591; background: #fff7e6; color: #ad4e00; }
-.gicu-inline { display: inline-flex; align-items: center; gap: 4px; }
-.gicu-retry { border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 6px; padding: 0 7px; font: inherit; font-size: 11px; cursor: pointer; margin-left: 6px; }
+/* 令牌声明在 :root —— 会话 header / 输入区这些入口挂在 .gicu-root 之外，落在 :root 上才取得到值。 */
+:root {
+  --gi-bg:#EEF0F4; --gi-card:#FFFFFF;
+  --gi-ink:#101319; --gi-ink-2:#5D6472; --gi-ink-3:#8A909C; --gi-line:#E2E5EB;
+  --gi-accent:#1D4ED8; --gi-dark:#161A20; --gi-warn-bg:#FFF3E6; --gi-warn-ink:#9A4A00;
+  --gi-r-card:18px; --gi-r-block:12px; --gi-r-ctl:10px; --gi-r-pill:999px;
+  --gi-s1:4px; --gi-s2:8px; --gi-s3:12px; --gi-s4:16px; --gi-s6:24px; --gi-s8:32px; --gi-s10:40px;
+  --gi-shadow-card:0 2px 8px rgba(16,19,25,.06);
+  --gi-shadow-pop:0 10px 28px rgba(16,19,25,.18);
+  --gi-fs-title:20px; --gi-fs-body:13px; --gi-fs-aux:11px;
+  --gi-ease:cubic-bezier(.2,0,0,1);
+}
+.gicu-root {
+  box-sizing:border-box; height:100%; min-height:0; width:100%;
+  display:flex; flex-direction:column;
+  background:var(--gi-bg); color:var(--gi-ink);
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  font-size:var(--gi-fs-body); line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.gicu-root *, .gicu-root *::before, .gicu-root *::after { box-sizing:border-box; }
+.gicu-num { font-variant-numeric:tabular-nums; }
+.gicu-scroll { min-height:0; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#C7CCD6 transparent; }
+.gicu-scroll::-webkit-scrollbar { width:10px; height:10px; }
+.gicu-scroll::-webkit-scrollbar-thumb { background:#C7CCD6; border:3px solid transparent; border-radius:var(--gi-r-pill); background-clip:content-box; }
+@media (prefers-reduced-motion: reduce) { .gicu-root * { transition-duration:1ms !important; animation-duration:1ms !important; } }
+
+/* ── 控件：四态齐全（hover / active / focus-visible / disabled）；禁用态一律灰化 ── */
+.gicu-btn {
+  display:inline-flex; align-items:center; justify-content:center; gap:var(--gi-s2);
+  min-height:44px; padding:0 var(--gi-s4);
+  border:0; border-radius:var(--gi-r-ctl);
+  background:var(--gi-card); color:var(--gi-ink);
+  box-shadow:0 0 0 1px var(--gi-line);
+  font:inherit; font-size:var(--gi-fs-body); cursor:pointer; white-space:nowrap;
+  transition-property:background-color, box-shadow, color, scale;
+  transition-duration:160ms; transition-timing-function:var(--gi-ease);
+}
+.gicu-btn:hover:not([disabled]) { background:#F7F8FA; box-shadow:0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.gicu-btn:active:not([disabled]) { scale:.96; }
+.gicu-btn:focus-visible { outline:2px solid var(--gi-accent); outline-offset:2px; }
+.gicu-btn[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
+.gicu-btn.primary { background:var(--gi-accent); color:#FFFFFF; box-shadow:var(--gi-shadow-card); }
+.gicu-btn.primary:hover:not([disabled]) { background:#1A46C2; }
+.gicu-btn.primary[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; }
+.gicu-btn.quiet { background:transparent; color:var(--gi-ink-2); box-shadow:none; }
+.gicu-btn.quiet:hover:not([disabled]) { background:rgba(16,19,25,.05); box-shadow:none; }
+.gicu-btn.quiet[disabled] { background:transparent; color:#B4B9C3; box-shadow:none; }
+.gicu-btn.danger { background:var(--gi-dark); color:#FFFFFF; box-shadow:var(--gi-shadow-card); }
+.gicu-btn.danger:hover:not([disabled]) { background:#232833; }
+.gicu-btn[data-on="1"] { background:var(--gi-dark); color:#FFFFFF; }
+
+/* ── 会话侧入口（挂在 .gicu-root 之外：取值写字面量，不依赖上方令牌）── */
+.gicu-dock { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.gicu-dockbtn {
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  min-height:44px; padding:0 16px; border:0; border-radius:10px;
+  background:#FFFFFF; color:#101319; box-shadow:0 0 0 1px #E2E5EB;
+  font:inherit; font-size:13px; cursor:pointer; white-space:nowrap;
+  transition-property:background-color, box-shadow, scale;
+  transition-duration:160ms; transition-timing-function:cubic-bezier(.2,0,0,1);
+}
+.gicu-dockbtn:hover { background:#F7F8FA; box-shadow:0 0 0 1px #CDD3DE, 0 2px 8px rgba(16,19,25,.06); }
+.gicu-dockbtn:active { scale:.96; }
+.gicu-dockbtn:focus-visible { outline:2px solid #1D4ED8; outline-offset:2px; }
+.gicu-dockbtn[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
+.gicu-dock .gicu-chip { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:999px; font-size:11px; background:#F1F2F5; color:#5D6472; white-space:nowrap; }
+.gicu-dock .gicu-chip[data-tone="warn"] { background:#FFF3E6; color:#9A4A00; }
+
+.gicu-input, .gicu-note {
+  width:100%; border:0; border-radius:var(--gi-r-ctl); padding:var(--gi-s3);
+  background:var(--gi-card); color:var(--gi-ink); box-shadow:0 0 0 1px var(--gi-line);
+  font:inherit; font-size:var(--gi-fs-body);
+  transition-property:box-shadow, background-color; transition-duration:160ms; transition-timing-function:var(--gi-ease);
+}
+.gicu-input:hover, .gicu-note:hover { background:#FBFCFD; }
+.gicu-input:focus-visible, .gicu-note:focus-visible { outline:none; box-shadow:0 0 0 2px var(--gi-accent); }
+.gicu-input[disabled], .gicu-note[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
+.gicu-note { min-height:88px; resize:vertical; }
+.gicu-select {
+  min-height:44px; min-width:0; border:0; border-radius:var(--gi-r-ctl); padding:0 var(--gi-s3);
+  background:var(--gi-card); color:var(--gi-ink); box-shadow:0 0 0 1px var(--gi-line);
+  font:inherit; font-size:var(--gi-fs-body); cursor:pointer;
+  transition-property:background-color, box-shadow; transition-duration:160ms; transition-timing-function:var(--gi-ease);
+}
+.gicu-select:hover { background:#F7F8FA; box-shadow:0 0 0 1px #CDD3DE; }
+.gicu-select:active { scale:.96; }
+.gicu-select:focus-visible { outline:2px solid var(--gi-accent); outline-offset:2px; }
+.gicu-select[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
+
+/* ── 采集屏：整屏两栏。左 = 照片投放区（本屏视觉主角），右 = 表单 ── */
+.gicu-screen { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:var(--gi-s4); padding:var(--gi-s4); }
+.gicu-hero {
+  display:flex; flex-direction:column; gap:var(--gi-s2); min-height:0; min-width:0;
+  padding:var(--gi-s2); border-radius:var(--gi-r-card); background:var(--gi-card); box-shadow:var(--gi-shadow-card);
+}
+.gicu-hero .drop {
+  flex:1; min-height:44px; width:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--gi-s3);
+  border:0; border-radius:var(--gi-r-ctl); padding:var(--gi-s6) var(--gi-s4);
+  background:#F7F8FA; color:var(--gi-ink-2); box-shadow:0 0 0 1px var(--gi-line);
+  font:inherit; font-size:var(--gi-fs-body); text-align:center; cursor:pointer;
+  transition-property:background-color, box-shadow, color, scale; transition-duration:180ms; transition-timing-function:var(--gi-ease);
+}
+.gicu-hero .drop:hover { background:#F1F3F7; color:var(--gi-ink); box-shadow:0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.gicu-hero .drop:active { scale:.96; }
+.gicu-hero .drop:focus-visible { outline:2px solid var(--gi-accent); outline-offset:2px; }
+.gicu-hero .drop[data-over="1"] { background:#EEF2FF; color:var(--gi-accent); box-shadow:0 0 0 2px var(--gi-accent); }
+.gicu-hero .drop .cam { font-size:var(--gi-fs-title); line-height:1; }
+.gicu-hero .drop .t1 { font-size:var(--gi-fs-body); font-weight:600; text-wrap:balance; }
+.gicu-hero .drop .t2 { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); text-wrap:pretty; }
+.gicu-hero .shot { flex:1; min-height:0; display:flex; flex-direction:column; gap:var(--gi-s2); }
+.gicu-hero .frame { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; border-radius:var(--gi-r-ctl); overflow:hidden; background:var(--gi-dark); }
+.gicu-hero .frame img { display:block; max-width:100%; max-height:100%; object-fit:contain; outline:1px solid rgba(0,0,0,.1); outline-offset:-1px; }
+.gicu-hero .frame .fallback { font-size:var(--gi-fs-aux); color:#B9C0CC; }
+.gicu-hero .meta { display:flex; align-items:center; gap:var(--gi-s2); flex-wrap:wrap; }
+.gicu-hero .nm { font-size:var(--gi-fs-body); font-weight:600; word-break:break-all; text-wrap:pretty; }
+.gicu-grow { flex:1 1 auto; }
+
+.gicu-form { display:flex; flex-direction:column; gap:var(--gi-s3); min-width:0; }
+.gicu-banner { border-radius:var(--gi-r-block); padding:var(--gi-s3); background:var(--gi-warn-bg); color:var(--gi-warn-ink); font-size:var(--gi-fs-aux); line-height:1.6; text-wrap:pretty; }
+.gicu-row { display:flex; align-items:center; gap:var(--gi-s2); flex-wrap:wrap; min-width:0; }
+.gicu-row .gicu-select { flex:1 1 200px; }
+.gicu-lbl { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
+.gicu-count { margin-left:auto; font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
+.gicu-actions { display:flex; align-items:center; gap:var(--gi-s2); flex-wrap:wrap; }
+.gicu-line { border-radius:var(--gi-r-block); padding:var(--gi-s2) var(--gi-s3); font-size:var(--gi-fs-aux); color:var(--gi-ink-2); background:#F1F2F5; text-wrap:pretty; }
+.gicu-line.warn { background:var(--gi-warn-bg); color:var(--gi-warn-ink); }
+.gicu-line.err { background:#FDECEC; color:#A32222; }
+.gicu-line.ok { background:#EAF3EC; color:#24603A; }
+.gicu-chip { display:inline-flex; align-items:center; gap:var(--gi-s1); min-height:22px; padding:0 var(--gi-s2); border-radius:var(--gi-r-pill); font-size:var(--gi-fs-aux); background:#F1F2F5; color:var(--gi-ink-2); white-space:nowrap; }
+.gicu-chip[data-tone="warn"] { background:var(--gi-warn-bg); color:var(--gi-warn-ink); }
+.gicu-chip[data-tone="ok"] { background:#EAF3EC; color:#24603A; }
+
+/* ── 五态状态行（逐字文案在组件里；这里是同一状态的五种色档）── */
+.gicu-state { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--gi-s2); padding:var(--gi-s8) var(--gi-s4); text-align:center; color:var(--gi-ink-2); font-size:var(--gi-fs-body); }
+.gicu-state .t { font-weight:600; color:var(--gi-ink); text-wrap:balance; }
+.gicu-state .d { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); max-width:44ch; text-wrap:pretty; }
+.gicu-state[data-line="1"] { flex-direction:row; align-items:center; justify-content:flex-start; text-align:left; gap:var(--gi-s2); padding:var(--gi-s2); border-radius:var(--gi-r-card); background:var(--gi-card); box-shadow:0 0 0 1px var(--gi-line); font-size:var(--gi-fs-aux); }
+.gicu-state[data-line="1"] .txt { flex:1 1 auto; min-width:0; text-wrap:pretty; }
+.gicu-state[data-line="1"][data-kind="running"] { background:#EEF2FF; color:#2A3EA8; box-shadow:0 0 0 1px #C7D2FE; }
+.gicu-state[data-line="1"][data-kind="ok"] { background:#EAF3EC; color:#24603A; box-shadow:0 0 0 1px #C6E0CE; }
+.gicu-state[data-line="1"][data-kind="bad"] { background:#FDECEC; color:#A32222; box-shadow:0 0 0 1px #F2C9C9; }
+.gicu-state[data-line="1"][data-kind="off"] { background:var(--gi-warn-bg); color:var(--gi-warn-ink); box-shadow:0 0 0 1px #F0C79A; }
+
+/* ── 三态（加载中 / 空 / 失败）：任何数据面都不留白屏 ── */
+.gicu-skel { width:100%; align-self:stretch; height:44px; border-radius:var(--gi-r-ctl); background:linear-gradient(90deg, rgba(16,19,25,.05), rgba(16,19,25,.10), rgba(16,19,25,.05)); background-size:200% 100%; animation:gicu-skel 1200ms ease-out infinite; }
+@keyframes gicu-skel { from { background-position:200% 0; } to { background-position:0 0; } }
+
+/* ══ 第二轮重做（2026-10-03）：采集屏重排 ══════════════════════════════════
+   真机截图里最丑的一屏：左栏投放区被拉成一块上百像素高的空白白板，右栏表单贴在顶上、
+   下面半屏空着。这里只覆盖布局与容器，不动任何令牌值与逐字文案。 */
+.gicu-screen {
+  align-items:stretch; gap:var(--gi-s6); padding:var(--gi-s6);
+  grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);
+  overflow-y:auto; scrollbar-width:thin; scrollbar-color:#C7CCD6 transparent;
+}
+.gicu-screen::-webkit-scrollbar { width:10px; height:10px; }
+.gicu-screen::-webkit-scrollbar-thumb { background:#C7CCD6; border:3px solid transparent; border-radius:var(--gi-r-pill); background-clip:content-box; }
+
+/* 左：照片投放区。**两栏都撑满高度**，投放板吃掉剩余空间（虚线靶 + 圆底相机图标，
+   一眼看出「这里是丢照片的地方」），不再是一块没有边界的空白白板。 */
+.gicu-hero { gap:var(--gi-s3); padding:var(--gi-s3); }
+.gicu-hero .drop {
+  flex:1; min-height:240px; width:100%; gap:var(--gi-s3);
+  border:1.5px dashed #CDD3DE; background:#FAFBFC;
+}
+.gicu-hero .drop:hover { border-color:var(--gi-accent); background:#F4F7FF; box-shadow:none; }
+.gicu-hero .drop[data-over="1"] { border-color:var(--gi-accent); border-style:solid; background:#EEF2FF; }
+.gicu-hero .drop .cam {
+  display:flex; align-items:center; justify-content:center;
+  width:56px; height:56px; border-radius:var(--gi-r-pill);
+  background:#EEF2FF; font-size:var(--gi-fs-title); line-height:1;
+}
+.gicu-hero .drop .t1 { font-size:var(--gi-fs-body); font-weight:600; }
+.gicu-hero .drop .t2 { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
+.gicu-hero .shot { flex:1; min-height:0; gap:var(--gi-s3); }
+.gicu-hero .frame { flex:1; min-height:0; max-height:none; padding:var(--gi-s2); }
+.gicu-hero .frame img { max-height:100%; }
+.gicu-hero .meta { flex:none; padding:0 var(--gi-s1); }
+
+/* 右：表单成卡并撑满同高，动作行贴底（下半屏不再空着） */
+.gicu-form {
+  gap:var(--gi-s4); padding:var(--gi-s6); min-height:100%;
+  border-radius:var(--gi-r-card); background:var(--gi-card); box-shadow:var(--gi-shadow-card);
+}
+.gicu-form .gicu-note { flex:1; min-height:132px; }
+.gicu-form .gicu-row .gicu-select { flex:1 1 100%; }
+.gicu-actions { margin-top:auto; padding-top:var(--gi-s2); gap:var(--gi-s3); }
+.gicu-actions .gicu-btn.primary { min-width:132px; }
+
+/* 「待整改（被督导退回）」块：退回闭环的店长侧承接面（退回原因 + 整改回拍入口） */
+.gicu-rework { display:flex; flex-direction:column; gap:var(--gi-s2); padding:var(--gi-s3); border-radius:var(--gi-r-block); background:#FDECEC; box-shadow:0 0 0 1px #F2C9C9; }
+.gicu-rework-h { font-size:var(--gi-fs-body); font-weight:600; color:#A32222; }
+.gicu-rework-item { display:flex; flex-direction:column; gap:var(--gi-s1); padding:var(--gi-s3); border-radius:var(--gi-r-ctl); background:var(--gi-card); }
+.gicu-rework-t { font-size:var(--gi-fs-body); font-weight:600; }
+.gicu-rework-r { font-size:var(--gi-fs-aux); color:var(--gi-ink-2); text-wrap:pretty; }
+.gicu-rework-d { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
+.gicu-rework-item .gicu-btn { align-self:flex-start; margin-top:var(--gi-s1); }
 `
 
     // ── 纯工具 ──────────────────────────────────────────────────────────────
@@ -359,6 +540,98 @@ window.__ModuleLoader__.load({
       return api
     }
 
+    // ── 跨包通道：店长端屏组件（本包发布 → 督导包外壳内嵌）──────────────────
+    const uiChannel = {
+      listeners: new Set(),
+      subscribe(listener) {
+        if (typeof listener !== 'function') return () => {}
+        uiChannel.listeners.add(listener)
+        return () => {
+          uiChannel.listeners.delete(listener)
+        }
+      },
+      notify() {
+        for (const listener of Array.from(uiChannel.listeners)) {
+          try {
+            listener()
+          } catch (error) {
+            /* 单个订阅者出错不影响其它 */
+          }
+        }
+      },
+    }
+
+    function exposeUiChannel() {
+      const api = {
+        version: 1,
+        // **必须返回同一个函数引用**（除非重新装载）：外壳用 useSyncExternalStore + Object.is 比对，
+        // 每次返回新函数会让订阅者白重渲染。
+        getScreen: () => (React ? CaptureScreen : null),
+        subscribe: (listener) => uiChannel.subscribe(listener),
+      }
+      globalThis[UI_CHANNEL] = api
+      // 屏组件已可用 → 通知已登记的订阅者（外壳装载顺序不定，谁后到谁自己再来取一次）。
+      uiChannel.notify()
+      return api
+    }
+
+    function exposeChannels() {
+      exposeViewChannel()
+      return exposeUiChannel()
+    }
+
+    // ── 督导包（外壳）通道：装没装决定入口点了有没有反应（说明 §5.1 不许留死按钮）──
+    function shellChannelOf() {
+      const channel = globalThis[SHELL_CHANNEL]
+      return channel && typeof channel === 'object' && typeof channel.open === 'function' ? channel : null
+    }
+
+    const shellBridge = {
+      ready: shellChannelOf() !== null,
+      snapshot: { ready: false },
+      listeners: new Set(),
+      subscribe(listener) {
+        if (typeof listener !== 'function') return () => {}
+        shellBridge.listeners.add(listener)
+        return () => {
+          shellBridge.listeners.delete(listener)
+        }
+      },
+      notify() {
+        shellBridge.snapshot = { ready: shellBridge.ready }
+        for (const listener of Array.from(shellBridge.listeners)) {
+          try {
+            listener()
+          } catch (error) {
+            /* 忽略 */
+          }
+        }
+      },
+      /** 轮询外壳通道是否已出现／消失；变了才换快照引用（否则 React 会白重渲染）。 */
+      sync() {
+        const ready = shellChannelOf() !== null
+        if (ready === shellBridge.ready) return ready
+        shellBridge.ready = ready
+        shellBridge.notify()
+        return ready
+      },
+    }
+    shellBridge.snapshot = { ready: shellBridge.ready }
+
+    /** 入口动作：切店长端（角色的唯一真源）+ 请外壳打开「巡店自查」主面板。 */
+    function openCaptureScreen(view) {
+      localView.setRole(ROLE_MANAGER)
+      const shell = shellChannelOf()
+      if (!shell) return false
+      try {
+        shell.open(view === 'logs' ? 'logs' : 'board')
+      } catch (error) {
+        console.warn('[gaia-inspection-capture-ui] 请外壳打开巡店自查面板失败：', error)
+        return false
+      }
+      return true
+    }
+
     // ── 取数：snapshot（离线 / 待判队列 → 状态行与提示条）────────────────────
     // 【必须换引用的快照】React 的 useSyncExternalStore 用 Object.is 比对 getSnapshot() 的返回值：
     // 若 getSnapshot 永远返回同一个被原地改属性的对象，React 判定「快照没变」直接 bailout，
@@ -464,6 +737,36 @@ window.__ModuleLoader__.load({
       },
     }
 
+    /**
+     * 「正在整改回拍哪一张」——做成 store 而不是组件内 useState：① 选择要跨重渲染存活
+     * （真机里用户选完可能先改说明/换门店再提交）；② 自测的渲染垫片整棵重挂会丢 useState，store 不会。
+     */
+    const reworkState = {
+      id: '',
+      snapshot: { id: '' },
+      listeners: new Set(),
+      subscribe(listener) {
+        reworkState.listeners.add(listener)
+        return () => reworkState.listeners.delete(listener)
+      },
+      notify() {
+        reworkState.snapshot = { id: reworkState.id }
+        reworkState.listeners.forEach((listener) => {
+          try {
+            listener()
+          } catch (error) {
+            /* 忽略 */
+          }
+        })
+      },
+      setId(next) {
+        const value = textOf(next)
+        if (value === reworkState.id) return
+        reworkState.id = value
+        reworkState.notify()
+      },
+    }
+
     /** 从后端回执读「单号 / 状态 / 是否排队 / 摘要」；缺就空着，**不臆造**。 */
     function readReceipt(payload) {
       const root = payload && typeof payload === 'object' ? payload : {}
@@ -502,16 +805,18 @@ window.__ModuleLoader__.load({
       return encoded
     }
 
-    async function submitSelfCheck({ storeId, note, photos }) {
+    async function submitSelfCheck({ storeId, note, photos, reworkOf }) {
       submitState.phase = 'busy'
       submitState.error = ''
       submitState.receipt = null
       submitState.lastStoreId = textOf(storeId)
       submitState.notify()
 
+      // reworkOf：本次是"整改回拍"哪一张被退回的单（后端据此把新单标出来源；单号不存在时后端会忽略）
+      const from = textOf(reworkOf)
       let body
       try {
-        body = { storeId: storeId || null, note: textOf(note), photos: await encodePhotos(photos) }
+        body = { storeId: storeId || null, note: textOf(note), photos: await encodePhotos(photos), ...(from ? { reworkOf: from } : {}) }
       } catch (error) {
         submitState.phase = 'failed'
         submitState.error = '照片读取失败：' + textOf((error && error.message) || error)
@@ -530,6 +835,9 @@ window.__ModuleLoader__.load({
           submitState.phase = 'done'
           submitState.receipt = receipt
           submitState.lastSubmittedAt = Date.now()
+          // 整改回拍一旦被后端受理，这次"正在整改回拍"就用掉了（新单已带来源，原单会被摘出待整改列表）。
+          // 放在这里而不是组件的 effect：effect 会被"上一次提交留下的 done"误触发（真机实测踩过）。
+          if (from) reworkState.setId('')
         }
         try {
           await postJson(REPORT_PATH, {
@@ -566,31 +874,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // ── 采集面的开关 ────────────────────────────────────────────────────────
-    const panel = {
-      open: false,
-      listeners: new Set(),
-      subscribe(listener) {
-        panel.listeners.add(listener)
-        return () => panel.listeners.delete(listener)
-      },
-      notify() {
-        panel.listeners.forEach((listener) => {
-          try {
-            listener()
-          } catch (error) {
-            /* 忽略 */
-          }
-        })
-      },
-      setOpen(next) {
-        const value = next === true
-        if (panel.open === value) return
-        panel.open = value
-        panel.notify()
-      },
-    }
-
     // ── 门店下拉：两家静态示例门店（不做增删改）────────────────────────────
     /** 后端门店名（示例门店·快餐档口甲 / 示例门店·正餐堂食乙）→ 画面级说明要求的下拉文案。 */
     function storeLabelOf(store) {
@@ -616,6 +899,41 @@ window.__ModuleLoader__.load({
       return out
     }
 
+    /**
+     * 「待整改（被督导退回）」：本店被退回过、且**还没有整改回拍单**的检查单。
+     *
+     * 数据来自同一个 `/snapshot`（后端已露出 `returnedAt` / `returnedCount` / `lastAction` / `reworkOf`）。
+     * 为什么需要它（用户实测反馈）：督导点完「退回并说明」之后，店长端什么都看不到 ——
+     * 「退回 → 店长看到原因 → 整改回拍 → 督导复核」这条链断在店长这一侧，退回就石沉大海了。
+     */
+    function pendingReworkOf(snapshot, storeId) {
+      const data = snapshot && typeof snapshot === 'object' ? snapshot : null
+      const list = data && Array.isArray(data.inspections) ? data.inspections : []
+      const reworked = new Set()
+      for (const item of list) {
+        const from = textOf(item && item.reworkOf)
+        if (from) reworked.add(from)
+      }
+      const key = textOf(storeId)
+      return list
+        .filter((item) => {
+          if (!item || !textOf(item.returnedAt)) return false
+          if (reworked.has(textOf(item.id))) return false
+          if (key && textOf(item.storeId) !== key) return false
+          return true
+        })
+        .map((item) => ({
+          id: textOf(item.id),
+          short: shortNo(item.id),
+          returnedAt: item.returnedAt,
+          returnedCount: Number(item.returnedCount) || 0,
+          dueAt: item.dueAt || null,
+          reason: textOf(item.lastAction && item.lastAction.reason),
+          actor: textOf(item.lastAction && item.lastAction.actor),
+        }))
+        .sort((a, b) => String(b.returnedAt || '').localeCompare(String(a.returnedAt || '')))
+    }
+
     /** 同一门店不允许重复提交未完成的分析：后端有该店「进行中」检查单 → 锁；本地刚提交过 60s 内也锁。 */
     function busyReasonOf(snapshot, storeId, now) {
       const data = snapshot && typeof snapshot === 'object' ? snapshot : null
@@ -634,23 +952,50 @@ window.__ModuleLoader__.load({
       return ''
     }
 
-    // ── 组件：视图标签 + 采集入口（输入区常驻）──────────────────────────────
-    function ViewTabs({ role, onRole }) {
+    // ── 呈现层辅助（不改逻辑层）：同一份 localError 里既有真错误也有「已载入示例」这类回执 ──
+    function localNoticeKind(message) {
+      const text = textOf(message)
+      if (text.indexOf('已载入示例') === 0) return 'ok'
+      if (text.indexOf('本地预览生成失败') === 0) return 'warn'
+      return 'err'
+    }
+
+    // ── 组件：入口按钮（输入区 / 会话 header 共用；督导包未装载时给可见内联提示）──
+    function CaptureOpenButton() {
+      const bridge = React.useSyncExternalStore(shellBridge.subscribe, () => shellBridge.snapshot, () => shellBridge.snapshot)
+
+      React.useEffect(() => {
+        shellBridge.sync()
+        const timer = window.setInterval(() => {
+          shellBridge.sync()
+        }, 2000)
+        return () => window.clearInterval(timer)
+      }, [])
+
       return React.createElement(
         'span',
-        { className: 'gicu-seg', title: CAPABILITY_ROLE + '：演示用视图切换，不做登录/权限' },
-        [ROLE_MANAGER, ROLE_SUPERVISOR].map((value) =>
-          React.createElement('button', { key: value, type: 'button', 'data-on': role === value ? '1' : '0', onClick: () => onRole(value) }, value === ROLE_MANAGER ? '店长端' : '督导端'),
+        { className: 'gicu-dock' },
+        React.createElement(
+          'button',
+          {
+            className: 'gicu-dockbtn',
+            type: 'button',
+            title: CAPABILITY_CAPTURE + '：切到店长端并打开巡店自查面板',
+            onClick: () => openCaptureScreen('board'),
+          },
+          '📷 ' + CAPABILITY_CAPTURE,
         ),
+        bridge.ready ? null : React.createElement('span', { className: 'gicu-chip', 'data-tone': 'warn' }, SHELL_MISSING_NOTICE),
       )
     }
 
+    // ── 组件：输入区常驻入口（1 枚按钮 + 未装载提示 + 离线 chip）──────────────
+    // 视图标签段（店长端/督导端）已由督导包外壳统一提供，这里不再重复（同一容器规格，§3.5 第 3 条）。
     function CaptureDock() {
-      const view = React.useSyncExternalStore(localView.subscribe, () => localView.role, () => localView.role)
       const snap = React.useSyncExternalStore(snapshotSource.subscribe, () => snapshotSource.snapshot, () => snapshotSource.snapshot)
 
       React.useEffect(() => {
-        exposeViewChannel()
+        exposeChannels()
         pullSnapshot()
         const timer = window.setInterval(() => {
           pullSnapshot()
@@ -661,31 +1006,21 @@ window.__ModuleLoader__.load({
       const offline = normalizeOffline(snap.data)
       offlineEdge.onSnapshot(offline)
 
-      const children = [
-        React.createElement('span', { className: 'gicu-lbl', key: 'lbl' }, '视图'),
-        React.createElement(ViewTabs, { role: view, onRole: (role) => localView.setRole(role), key: 'tabs' }),
-      ]
-
-      if (view === ROLE_MANAGER) {
-        children.push(
-          React.createElement('button', { className: 'gicu-btn primary', type: 'button', key: 'cap', title: CAPABILITY_CAPTURE, onClick: () => panel.setOpen(true) }, '📷 ' + CAPABILITY_CAPTURE),
-        )
-      } else {
-        children.push(React.createElement('span', { className: 'gicu-lbl', key: 'sup' }, '督导端：判断回放看板见右侧/会话面板'))
-      }
+      const children = [React.createElement(CaptureOpenButton, { key: 'open' })]
 
       if (offline.known && offline.offline) {
-        children.push(React.createElement('span', { className: 'gicu-off', key: 'off' }, '离线：仅采集排队，不产生模型判断'))
+        children.push(React.createElement('span', { className: 'gicu-chip', 'data-tone': 'warn', key: 'off' }, '离线：仅采集排队，不产生模型判断'))
       } else if (snap.failure) {
-        children.push(React.createElement('span', { className: 'gicu-lbl', key: 'nf' }, '采集状态未知（' + snap.failure + '）'))
+        children.push(React.createElement('span', { className: 'gicu-chip', key: 'nf' }, '采集状态未知（' + snap.failure + '）'))
       }
 
       return React.createElement('div', { className: 'gicu-dock' }, children)
     }
 
-    // ── 组件：屏 A（手机形状卡片）──────────────────────────────────────────
-    function CapturePanel() {
-      const opened = React.useSyncExternalStore(panel.subscribe, () => panel.open, () => panel.open)
+    // ── 组件：屏 A · 店长端（整屏；由督导包外壳内嵌）─────────────────────────
+    // 本组件**只渲染店长端屏主体**：不自画屏标题/副标题、不放角色视图切换（外壳统一提供，同一容器规格）。
+    // 外层自带 .gicu-root（自声明令牌），可独立存活。
+    function CaptureScreen() {
       const submission = React.useSyncExternalStore(submitState.subscribe, () => submitState.snapshot, () => submitState.snapshot)
       const snap = React.useSyncExternalStore(snapshotSource.subscribe, () => snapshotSource.snapshot, () => snapshotSource.snapshot)
 
@@ -696,18 +1031,14 @@ window.__ModuleLoader__.load({
       const [dragOver, setDragOver] = React.useState(false)
       const [sampleBusy, setSampleBusy] = React.useState(false)
       const inputRef = React.useRef(null)
+      // 正在整改回拍的原单号（store：跨重渲染存活，见 reworkState 的说明）
+      const rework = React.useSyncExternalStore(reworkState.subscribe, () => reworkState.snapshot, () => reworkState.snapshot)
+      const reworkOf = rework.id
 
       React.useEffect(() => {
-        if (!opened) return undefined
-        const onKey = (event) => {
-          if (event && (event.key === 'Escape' || event.key === 'Esc')) panel.setOpen(false)
-        }
-        document.addEventListener('keydown', onKey)
         pullSnapshot()
-        return () => document.removeEventListener('keydown', onKey)
-      }, [opened])
-
-      if (!opened) return null
+        return undefined
+      }, [])
 
       const stores = storesOf(snap.data)
       const offline = normalizeOffline(snap.data)
@@ -715,6 +1046,11 @@ window.__ModuleLoader__.load({
       const effectiveStore = storeId || (stores.length > 0 ? stores[0].storeId : '')
       const now = Date.now()
       const busyReason = busyReasonOf(snap.data, effectiveStore, now)
+      const pendingRework = pendingReworkOf(snap.data, effectiveStore)
+
+      // 注：「正在整改回拍」的清空**不放在这里**——上一版用 `phase === 'done'` 的 effect 清，
+      // 结果上一次提交留下的 done 会把刚点上的回拍标记当场清掉（真机实测踩过：点了整改回拍，
+      // 提交出去的新单没有来源）。现在由 submitSelfCheck 在**本次提交被后端受理后**自己清。
 
       const noteLen = Array.from(note).length
       const noteOk = noteLen >= NOTE_MIN && noteLen <= NOTE_MAX
@@ -788,73 +1124,123 @@ window.__ModuleLoader__.load({
           return
         }
         setLocalError('')
-        await submitSelfCheck({ storeId: effectiveStore, note, photos: [photo] })
+        await submitSelfCheck({ storeId: effectiveStore, note, photos: [photo], reworkOf: reworkOf || undefined })
         // 失败时输入与照片都保留（说明 §1.3）：这里**不清空**任何字段。
       }
 
-      // 状态行（五态逐字）
+      // 状态行（五态逐字）：同一条 .gicu-state[data-line="1"]，按 data-kind 换色档（动态数字用 .gicu-num）
       let stateNode
       const noText = submission.receipt ? shortNo(submission.receipt.no) : ''
       if (offlineEdge.recovering(now)) {
         const n = offlineEdge.lastPending === null ? 'N' : String(offlineEdge.lastPending)
-        stateNode = React.createElement('div', { className: 'gicu-state', 'data-kind': 'off' }, '已联网，正在补判排队中的 ' + n + ' 条…')
+        stateNode = React.createElement(
+          'div',
+          { className: 'gicu-state', key: 'state', 'data-line': '1', 'data-kind': 'off' },
+          React.createElement('span', { className: 'txt gicu-num' }, '已联网，正在补判排队中的 ' + n + ' 条…'),
+        )
       } else if (running) {
-        stateNode = React.createElement('div', { className: 'gicu-state', 'data-kind': 'running' }, STATE_RUNNING)
+        stateNode = React.createElement(
+          'div',
+          { className: 'gicu-state', key: 'state', 'data-line': '1', 'data-kind': 'running' },
+          React.createElement('span', { className: 'txt' }, STATE_RUNNING),
+        )
       } else if (submission.phase === 'failed') {
         stateNode = React.createElement(
           'div',
-          { className: 'gicu-state', 'data-kind': 'bad' },
-          '分析失败：' + (submission.error || '未收到原因摘要'),
-          React.createElement('button', { className: 'gicu-retry', type: 'button', onClick: doSubmit }, '重试'),
+          { className: 'gicu-state', key: 'state', 'data-line': '1', 'data-kind': 'bad' },
+          React.createElement('span', { className: 'txt gicu-num' }, '分析失败：' + (submission.error || '未收到原因摘要')),
+          React.createElement('button', { className: 'gicu-btn', type: 'button', onClick: doSubmit }, '重试'),
         )
       } else if (submission.phase === 'done' && submission.receipt) {
         const receipt = submission.receipt
         if (receipt.queued || (offline.known && offline.offline)) {
-          stateNode = React.createElement('div', { className: 'gicu-state', 'data-kind': 'off' }, OFFLINE_NOTICE + (receipt.summary ? '（' + receipt.summary + '）' : ''))
+          stateNode = React.createElement(
+            'div',
+            { className: 'gicu-state', key: 'state', 'data-line': '1', 'data-kind': 'off' },
+            React.createElement('span', { className: 'txt' }, OFFLINE_NOTICE + (receipt.summary && receipt.summary !== OFFLINE_NOTICE ? '（' + receipt.summary + '）' : '')),
+          )
         } else {
-          stateNode = React.createElement('div', { className: 'gicu-state', 'data-kind': 'ok' }, '已提交，编号 ' + (noText || '（后端未返回编号）') + '，等待督导复核')
+          stateNode = React.createElement(
+            'div',
+            { className: 'gicu-state', key: 'state', 'data-line': '1', 'data-kind': 'ok' },
+            React.createElement('span', { className: 'txt gicu-num' }, '已提交，编号 ' + (noText || '（后端未返回编号）') + '，等待督导复核'),
+          )
         }
       } else {
-        stateNode = React.createElement('div', { className: 'gicu-state', 'data-kind': 'idle' }, STATE_EMPTY)
+        // 就绪时不能再说「照片与文字都填写后按钮可用」——那一刻按钮已经可用了。
+        // （真机截图里出现过：照片和文字都填好了、按钮是亮蓝的，状态行却还写着这句。）
+        stateNode = React.createElement(
+          'div',
+          { className: 'gicu-state', key: 'state', 'data-line': '1', 'data-kind': 'idle' },
+          React.createElement('span', { className: 'txt' }, canSubmit ? STATE_READY : STATE_EMPTY),
+        )
       }
 
-      const body = []
-
-      body.push(React.createElement(ViewTabs, { key: 'tabs', role: localView.role, onRole: (role) => localView.setRole(role) }))
-      body.push(React.createElement('div', { className: 'gicu-banner', key: 'notice' }, DEMO_NOTICE))
-
-      body.push(
-        React.createElement(
+      // 门店下拉：三态齐全（读到了 / 正在读 / 读不到）——任何一态都不留白屏（契约 §3.3）
+      let storeField
+      if (stores.length > 0) {
+        storeField = React.createElement(
+          'select',
+          { className: 'gicu-select', value: effectiveStore, onChange: (event) => setStoreId(event && event.target ? event.target.value : '') },
+          stores.map((store) => React.createElement('option', { key: store.storeId, value: store.storeId }, store.label)),
+        )
+      } else if (snap.failure) {
+        storeField = React.createElement(
           'div',
-          { className: 'gicu-row', key: 'store' },
-          React.createElement('span', { className: 'gicu-lbl' }, '门店'),
-          stores.length > 0
-            ? React.createElement(
-                'select',
-                { className: 'gicu-select', value: effectiveStore, onChange: (event) => setStoreId(event && event.target ? event.target.value : '') },
-                stores.map((store) => React.createElement('option', { key: store.storeId, value: store.storeId }, store.label)),
-              )
-            : React.createElement('span', { className: 'gicu-lbl' }, '门店列表不可用（' + (snap.failure || '后端未就绪') + '）'),
-        ),
-      )
+          { className: 'gicu-state' },
+          React.createElement('div', { className: 't' }, '门店列表不可用'),
+          React.createElement('div', { className: 'd' }, snap.failure + '：门店读不到就不猜门店，先把后端（gaia-inspection-core）弄通再重试。'),
+          React.createElement('button', { className: 'gicu-btn', type: 'button', onClick: () => pullSnapshot() }, '重试'),
+        )
+      } else if (!snap.data) {
+        storeField = React.createElement(
+          'div',
+          { className: 'gicu-state' },
+          React.createElement('div', { className: 'gicu-skel' }),
+          React.createElement('div', { className: 't' }, '正在读取门店列表…'),
+          React.createElement('div', { className: 'd' }, '门店来自 /api/gaia-inspection/snapshot：读不到就不假装能选门店。'),
+        )
+      } else {
+        storeField = React.createElement(
+          'div',
+          { className: 'gicu-state' },
+          React.createElement('div', { className: 't' }, '门店列表为空'),
+          React.createElement('div', { className: 'd' }, '后端未给出可自查的门店（snapshot.stores 为空）：把门店配好再点重试。'),
+          React.createElement('button', { className: 'gicu-btn', type: 'button', onClick: () => pullSnapshot() }, '重试'),
+        )
+      }
 
+      // 左栏：照片投放区（本屏视觉主角）——空态是整块投放区，选中态是大图预览 + 文件名 + 删除
+      const heroChildren = []
       if (photo) {
-        body.push(
+        heroChildren.push(
           React.createElement(
             'div',
-            { className: 'gicu-photo', key: 'photo' },
-            photo.dataUrl ? React.createElement('img', { src: photo.dataUrl, alt: photo.name }) : React.createElement('span', { style: { width: '62px', height: '62px', background: '#000', borderRadius: '8px', flex: 'none' } }),
-            React.createElement('span', { className: 'nm' }, photo.name + (photo.size ? ' · ' + fmtBytes(photo.size) : '') + (photo.sampleLabel ? '\n' + photo.sampleLabel : '')),
-            React.createElement('button', { className: 'del', type: 'button', onClick: () => { setPhoto(null); setLocalError('') } }, '删除'),
+            { className: 'shot', key: 'shot' },
+            React.createElement(
+              'div',
+              { className: 'frame' },
+              photo.dataUrl ? React.createElement('img', { src: photo.dataUrl, alt: photo.name }) : React.createElement('span', { className: 'fallback' }, '预览生成中…'),
+            ),
+            React.createElement(
+              'div',
+              { className: 'meta' },
+              React.createElement('span', { className: 'nm' }, photo.name),
+              photo.size ? React.createElement('span', { className: 'gicu-chip gicu-num' }, fmtBytes(photo.size)) : null,
+              React.createElement('span', { className: 'gicu-grow' }),
+              React.createElement('button', { className: 'gicu-btn', type: 'button', onClick: () => { setPhoto(null); setLocalError('') } }, '删除'),
+            ),
+            photo.sampleLabel ? React.createElement('div', { className: 'gicu-line' }, photo.sampleLabel) : null,
           ),
         )
       } else {
-        body.push(
+        heroChildren.push(
           React.createElement(
-            'div',
+            'button',
             {
-              className: 'gicu-drop',
+              className: 'drop',
               key: 'drop',
+              type: 'button',
               'data-over': dragOver ? '1' : '0',
               onClick: () => inputRef.current && inputRef.current.click(),
               onDragOver: (event) => {
@@ -874,7 +1260,7 @@ window.__ModuleLoader__.load({
           ),
         )
       }
-      body.push(
+      heroChildren.push(
         React.createElement('input', {
           key: 'file',
           ref: inputRef,
@@ -888,55 +1274,90 @@ window.__ModuleLoader__.load({
         }),
       )
 
-      body.push(React.createElement('div', { className: 'gicu-lbl', key: 'note-lbl' }, '一句话说明'))
-      body.push(
+      // 右栏：表单（提示条 → 门店下拉 → 一句话说明 + 字数 → 载入示例 / 提交并分析 → 五态状态行）
+      const formChildren = []
+      formChildren.push(React.createElement('div', { className: 'gicu-banner', key: 'notice' }, DEMO_NOTICE))
+      // 「待整改（被督导退回）」：退回闭环的店长侧承接面。没有它，督导点完退回就石沉大海
+      // （用户实测反馈：点了好几次退回并说明，找不到退到哪去了）。
+      if (pendingRework.length > 0) {
+        formChildren.push(
+          React.createElement('div', { className: 'gicu-rework', key: 'rework' }, [
+            React.createElement('div', { className: 'gicu-rework-h', key: 'h' }, '待整改（被督导退回） ' + pendingRework.length + ' 条'),
+            ...pendingRework.map((item) =>
+              React.createElement('div', { className: 'gicu-rework-item', key: item.id }, [
+                React.createElement('div', { className: 'gicu-rework-t gicu-num', key: 't' }, item.short + '　退回 ' + (clockOf(item.returnedAt) || '—') + (item.returnedCount > 1 ? '（共退回 ' + item.returnedCount + ' 次）' : '') + (item.actor ? '　由 ' + item.actor : '')),
+                React.createElement('div', { className: 'gicu-rework-r', key: 'r' }, '退回原因：' + (item.reason || '（后端未记录原因文本）')),
+                item.dueAt ? React.createElement('div', { className: 'gicu-rework-d gicu-num', key: 'd' }, '整改截止 ' + (clockOf(item.dueAt) || textOf(item.dueAt))) : null,
+                React.createElement(
+                  'button',
+                  {
+                    className: 'gicu-btn',
+                    type: 'button',
+                    key: 'b',
+                    onClick: () => {
+                      if (reworkOf === item.id) {
+                        reworkState.setId('')
+                        setLocalError('已取消整改回拍。')
+                        return
+                      }
+                      reworkState.setId(item.id)
+                      setLocalError('正在整改回拍 ' + item.short + '：拍一张整改后的照片、写一句说明，提交后新单会标「整改回拍自 ' + item.short + '」，督导端能看到来源。')
+                    },
+                  },
+                  reworkOf === item.id ? '取消整改回拍' : '整改后重新提交',
+                ),
+              ]),
+            ),
+          ]),
+        )
+      }
+      formChildren.push(
+        React.createElement(
+          'div',
+          { className: 'gicu-row', key: 'store' },
+          React.createElement('span', { className: 'gicu-lbl' }, '门店'),
+          storeField,
+        ),
+      )
+      formChildren.push(
+        React.createElement(
+          'div',
+          { className: 'gicu-row', key: 'note-lbl' },
+          React.createElement('span', { className: 'gicu-lbl' }, '一句话说明'),
+          React.createElement('span', { className: 'gicu-count gicu-num' }, noteLen + ' / ' + NOTE_MAX + ' 字'),
+        ),
+      )
+      formChildren.push(
         React.createElement('textarea', {
           key: 'note',
-          className: 'gicu-ta',
+          className: 'gicu-note',
           value: note,
           maxLength: NOTE_MAX,
           placeholder: '例：接班时拍的，后门那堆货还没清，上一个班次留下的',
           onChange: (event) => setNote(event && event.target ? event.target.value : ''),
         }),
       )
-      body.push(React.createElement('div', { className: 'gicu-count', key: 'count' }, noteLen + ' / ' + NOTE_MAX + ' 字'))
-
-      if (localError) body.push(React.createElement('div', { className: 'gicu-state', key: 'local', 'data-kind': 'idle' }, localError))
-      if (busyReason) body.push(React.createElement('div', { className: 'gicu-state', key: 'busy-store', 'data-kind': 'off' }, busyReason))
-
-      body.push(
+      if (localError) formChildren.push(React.createElement('div', { className: 'gicu-line ' + localNoticeKind(localError), key: 'local' }, localError))
+      if (busyReason) formChildren.push(React.createElement('div', { className: 'gicu-line warn', key: 'busy-store' }, busyReason))
+      if (reworkOf) formChildren.push(React.createElement('div', { className: 'gicu-line ok', key: 'rework-banner' }, '正在整改回拍 ' + shortNo(reworkOf) + '：提交后新单会标注「整改回拍自 ' + shortNo(reworkOf) + '」，督导端能看到来源。'))
+      formChildren.push(
         React.createElement(
           'div',
           { className: 'gicu-actions', key: 'actions' },
           React.createElement('button', { className: 'gicu-btn', type: 'button', disabled: sampleBusy || running, onClick: loadSample }, sampleBusy ? '载入中…' : '载入示例'),
-          React.createElement('span', { className: 'grow' }),
+          React.createElement('span', { className: 'gicu-grow' }),
           React.createElement('button', { className: 'gicu-btn primary', type: 'button', disabled: !canSubmit, onClick: doSubmit }, running ? '正在分析…' : '提交并分析'),
         ),
       )
-
-      body.push(React.createElement('div', { key: 'state' }, stateNode))
+      formChildren.push(stateNode)
 
       return React.createElement(
         'div',
-        {
-          className: 'gicu-panel',
-          onClick: (event) => {
-            if (event && event.target === event.currentTarget) panel.setOpen(false)
-          },
-        },
-        React.createElement(
-          'div',
-          { className: 'gicu-phone' },
-          React.createElement('div', { className: 'gicu-notch' }, '门店端 · ' + CAPABILITY_CAPTURE),
-          React.createElement(
-            'div',
-            { className: 'gicu-body' },
-            [
-              React.createElement('div', { className: 'gicu-row', key: 'close' }, React.createElement('span', { className: 'grow', style: { flex: 1 } }), React.createElement('button', { className: 'gicu-btn', type: 'button', onClick: () => panel.setOpen(false) }, '收起')),
-              ...body,
-            ],
-          ),
-        ),
+        { className: 'gicu-root' },
+        React.createElement('div', { className: 'gicu-screen' }, [
+          React.createElement('section', { className: 'gicu-hero', key: 'hero' }, heroChildren),
+          React.createElement('section', { className: 'gicu-form gicu-scroll', key: 'form' }, formChildren),
+        ]),
       )
     }
 
@@ -947,54 +1368,51 @@ window.__ModuleLoader__.load({
       styleEl.textContent = CSS
       document.head.appendChild(styleEl)
 
-      exposeViewChannel()
+      exposeChannels()
 
-      const slots = ctx && typeof ctx.get === 'function' ? ctx.get('slots') : undefined
+      // 【真机实测必须项】不声明 exports.inject 时宿主 apply 得早，`ctx.get('slots')` 会是 undefined，
+      // 本包会一路 return：输入区那枚「门店自查采集入口」根本不会出现。
+      const slots = (ctx && ctx.slots) || (ctx && typeof ctx.get === 'function' ? ctx.get('slots') : undefined)
       if (!slots) {
-        console.warn('[gaia-inspection-capture-ui] 宿主未提供 slots 服务，采集入口与视图切换均未挂载')
+        console.warn('[gaia-inspection-capture-ui] 宿主未提供 slots 服务，会话侧两枚采集入口均未挂载')
         return
       }
 
-      // ① 输入区常驻：视图标签（角色视图切换）+「门店自查采集入口」按钮。
+      // ① 输入区常驻：1 枚「门店自查采集入口」（视图标签段由督导包外壳统一提供，本包不再重复）。
       ctx.effect(
         () => slots.inject(DOCK_SLOT, () => slots.register({ name: DOCK_SLOT, id: 'gaia-inspection-capture-ui', order: 42, label: CAPABILITY_CAPTURE }, CaptureDock)),
         'gaia-inspection-capture-ui: input dock entry',
       )
 
-      // ② 屏 A（手机形状卡片）挂在无遮罩浮层里：不挡会话（说明 §四 6 只禁"全屏遮窗"）。
+      // ② 会话 header 也放一枚同样的入口，便于在会话顶部一步打开。
       ctx.effect(
-        () => slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'gaia-inspection-capture-screen', order: 42, label: CAPABILITY_CAPTURE, children: {} }, CapturePanel)),
-        'gaia-inspection-capture-ui: capture screen',
-      )
-
-      // ③ 会话 header 也放一枚入口，便于在会话顶部一步打开。
-      ctx.effect(
-        () =>
-          slots.inject(HEADER_SLOT, () =>
-            slots.register({ name: HEADER_SLOT, id: 'gaia-inspection-capture-open', order: 46, label: CAPABILITY_CAPTURE }, () =>
-              React.createElement(
-                'button',
-                { className: 'gicu-btn', type: 'button', title: '打开' + CAPABILITY_CAPTURE, onClick: () => panel.setOpen(true) },
-                '📷 提交并分析',
-              ),
-            ),
-          ),
+        () => slots.inject(HEADER_SLOT, () => slots.register({ name: HEADER_SLOT, id: 'gaia-inspection-capture-open', order: 46, label: CAPABILITY_CAPTURE }, CaptureOpenButton)),
         'gaia-inspection-capture-ui: header entry',
       )
 
+      // ③ 屏 A 不再注册 shell.overlay：店长端屏（CaptureScreen）由督导包主面板（main key = gaia-inspection）
+      //    通过 __gaia_inspection_ui__.getScreen() 取组件内嵌；本包不注册 sidebar.panellist / main。
+      shellBridge.sync()
       pullSnapshot()
     }
 
+    /** 声明式依赖：slots 必给；layout 供「打开外壳面板」用（拿不到时降级为内联提示）。 */
+    exports.inject = ['slots', 'layout']
     exports.apply = apply
     exports.__test = {
       CAPABILITY_CAPTURE,
       CAPABILITY_ROLE,
+      VIEW_CHANNEL,
+      UI_CHANNEL,
+      SHELL_CHANNEL,
+      SHELL_MISSING_NOTICE,
       MAX_PHOTOS,
       MAX_PHOTO_BYTES,
       NOTE_MAX,
       DEMO_NOTICE,
       OFFLINE_NOTICE,
       STATE_EMPTY,
+      STATE_READY,
       STATE_RUNNING,
       SAMPLE_NOTE,
       splitDataUrl,
@@ -1006,16 +1424,21 @@ window.__ModuleLoader__.load({
       storeLabelOf,
       normalizeOffline,
       busyReasonOf,
+      pendingReworkOf,
       offlineEdge,
       localView,
       submitState,
-      panel,
+      reworkState,
       snapshotSource,
       pullSnapshot,
       submitSelfCheck,
+      exposeChannels,
+      openCaptureScreen,
+      shellBridge,
+      uiChannel,
+      CaptureScreen,
       CaptureDock,
-      CapturePanel,
-      ViewTabs,
+      CaptureOpenButton,
       hasReact: React !== null,
     }
     return module.exports

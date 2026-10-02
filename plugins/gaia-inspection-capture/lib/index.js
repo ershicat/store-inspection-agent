@@ -204,6 +204,8 @@ export async function apply(ctx, config = {}) {
       status: 'pending_rectify',
       source: 'selfcheck',
       demo: false,
+      // 整改回拍来源（店长端从「待整改」发起时带的原单号）；不是回拍单就是 null
+      reworkOf: body.reworkOf ?? null,
       createdAt: at,
       dueAt: null,
       items: Array.isArray(body.checklistItems) ? body.checklistItems : [],
@@ -341,6 +343,37 @@ export async function apply(ctx, config = {}) {
     return `INS-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${Math.random().toString(36).slice(2, 6)}`
   }
 
+  /**
+   * 「本次查哪几项」的那次模型调用 —— **必须**把「门店档案解析后的名字/业态」与「本次照片原图」一起送进去。
+   *
+   * 真机教训（教练在真机数据里抓到，见交付报告 §13）：早先这里传的是 HTTP body 里的
+   * `storeName/storeType`（前端根本不发这两个字段），并且**完全不传照片**，于是模型在 reasons 里
+   * 如实写下「本次仅有店长说明，无照片，且门店与业态未指定」；而同一单后面那次视觉判断却知道
+   * 门店是 S-001/快餐档口、也知道照片里有瓶子 —— 两次调用自相矛盾，核心差异化点做掉了一半。
+   * 现在：门店档案先解析（与 judgeInternal 用同一份口径），照片按字节原样交给 core 作为图像输入。
+   */
+  async function decideChecklist({ storeId, storeName, storeType, note, photos, timeoutMs, inspectionId }) {
+    const cs = checklistSlot()
+    if (!cs) return { items: [], reasons: '', callId: null, storeInfo: null, error: { code: 'DEPENDENCY_MISSING', message: 'ns.checklist 未就绪（gaia-inspection-core 未加载）：本次没有动态检查项' } }
+    const reg = registrySlot()
+    let storeInfo = null
+    if (reg && storeId) {
+      const r = reg.getStore(String(storeId))
+      if (r && r.ok) storeInfo = r.data
+    }
+    const r = await cs.generate({
+      storeId,
+      storeName: (storeInfo && storeInfo.name) || storeName,
+      storeType: (storeInfo && storeInfo.format) || storeType,
+      note,
+      photos,
+      inspectionId,
+      timeoutMs,
+    })
+    if (r && r.ok) return { items: r.data.items, reasons: r.data.reasons, callId: r.callId, storeInfo, error: null }
+    return { items: [], reasons: '', callId: null, storeInfo, error: (r && r.error) || { code: 'CHECKLIST_UNKNOWN', message: '检查项生成未返回结果' } }
+  }
+
   // ── ① 提交自查（前端「提交自查」入口的后端口；也是 /submit 路由的落点） ────────
   async function submit(body) {
     const b = body && typeof body === 'object' ? body : {}
@@ -348,21 +381,45 @@ export async function apply(ctx, config = {}) {
     const input = collectPhotoInputs(b, MAX_PHOTOS_SUBMIT)
     if (!input.ok) return receipt({ ok: false, status: 'failed', summary: input.error.message, error: input.error })
 
+    const offline = state.manualOffline === true || state.routeDown === true
+    // runId 在**检查项生成之前**就定下来：这样两次模型调用（checklist_generate / vision_judge）
+    // 都挂在同一张检查单上，看板详情里的「模型调用 N 次」才是真数（早先 checklist 那条的
+    // inspectionId 是 null，所以明明调了两次却只显示 1 次）。
+    const runId = offline ? null : newRunId()
+
+    // 「整改回拍」来源：店长端从「待整改」里点重新提交时带上原单号（reworkOf）。
+    // 只有原单**真的存在**才认（不写脏来源）；这样督导端能看出"这单是整改回拍自 #xxxx"，
+    // 退回→整改→复交这条链才闭合（用户实测反馈：点完退回之后找不到退到哪去了）。
+    const reworkOf = (() => {
+      const want = String(b.reworkOf || '').trim()
+      if (!want) return null
+      try {
+        return db().get('inspections', want) ? want : null
+      } catch {
+        return null
+      }
+    })()
+
     // 检查项动态生成（真模型调用；离线时不调用，队列里带上原始输入，联网后一起补）
     let checklist = { items: [], reasons: '', callId: null }
-    const offline = state.manualOffline === true || state.routeDown === true
     if (!offline) {
-      const cs = checklistSlot()
-      if (cs) {
-        try {
-          const r = await cs.generate({ storeId: b.storeId, storeName: b.storeName, storeType: b.storeType, note: b.note, timeoutMs: b.timeoutMs })
-          if (r && r.ok) checklist = { items: r.data.items, reasons: r.data.reasons, callId: r.callId }
-        } catch (error) {
-          logger.warn(`检查项生成异常（继续按"无检查项"判读）：${String((error && error.message) || error)}`)
-        }
+      try {
+        const decided = await decideChecklist({
+          storeId: b.storeId,
+          storeName: b.storeName,
+          storeType: b.storeType,
+          note: b.note,
+          photos: input.photos,
+          inspectionId: runId,
+          timeoutMs: b.timeoutMs,
+        })
+        checklist = { items: decided.items, reasons: decided.reasons, callId: decided.callId }
+        if (decided.error) logger.warn(`检查项生成未成功（${decided.error.code}）：${decided.error.message}；本次按"无检查项"继续判读`)
+      } catch (error) {
+        logger.warn(`检查项生成异常（继续按"无检查项"判读）：${String((error && error.message) || error)}`)
       }
     }
-    const runBody = { ...b, checklistItems: checklist.items, checklistReasons: checklist.reasons, checklistCallId: checklist.callId }
+    const runBody = { ...b, checklistItems: checklist.items, checklistReasons: checklist.reasons, checklistCallId: checklist.callId, reworkOf }
 
     if (offline) {
       const { queueDir } = paths()
@@ -374,6 +431,7 @@ export async function apply(ctx, config = {}) {
         storeName: b.storeName ?? null,
         storeType: b.storeType ?? null,
         photoIds: saved.map((s) => s.photoId),
+        reworkOf,
         reason: 'offline-switch',
       })
       const st = readQueueState(queueDir)
@@ -383,13 +441,12 @@ export async function apply(ctx, config = {}) {
         runId: item.qid,
         status: 'queued',
         summary: OFFLINE_NOTICE,
-        data: { offline: true, offlineSource: offlineSource(), queuePosition: st.pending, qid: item.qid, accepted: input.photos.length, modelCallsAdded: 0, photos: artifactsOf(saved) },
+        data: { offline: true, offlineSource: offlineSource(), queuePosition: st.pending, qid: item.qid, accepted: input.photos.length, modelCallsAdded: 0, reworkOf, photos: artifactsOf(saved) },
         artifacts: artifactsOf(saved),
         traceRef: `queue/${item.qid}`,
       })
     }
 
-    const runId = newRunId()
     const result = await judgeInternal({ photoInputs: input.photos, body: runBody, runId })
     if (!result.ok) {
       const code = (result.error && result.error.code) || 'MODEL_CALL_FAILED'
@@ -482,7 +539,29 @@ export async function apply(ctx, config = {}) {
     }
     if (inputs.length === 0) return { ok: false, error: { code: 'NO_PHOTO', message: `队列项 ${row.qid} 没有可用原图` } }
     const runId = newRunId()
-    const result = await judgeInternal({ photoInputs: inputs, body: { storeId: row.storeId, note: row.note, storeName: row.storeName, storeType: row.storeType, provider: row.provider, model: row.model }, runId })
+    // 补判也要先决定「查哪几项」：这条路径同样拿得到原图，且此刻已联网 —— 否则离线提交的单子
+    // 永远没有动态检查项，视觉判断只能"按照片里看得到的证据判读"，与在线提交的口径不一致。
+    let checklistItems = []
+    let checklistReasons = ''
+    let checklistCallId = null
+    try {
+      const decided = await decideChecklist({
+        storeId: row.storeId,
+        storeName: row.storeName,
+        storeType: row.storeType,
+        note: row.note,
+        photos: inputs,
+        inspectionId: runId,
+        timeoutMs: row.timeoutMs,
+      })
+      checklistItems = decided.items
+      checklistReasons = decided.reasons
+      checklistCallId = decided.callId
+      if (decided.error) logger.warn(`补判前的检查项生成未成功（${decided.error.code}）：${decided.error.message}；本次按"无检查项"判读`)
+    } catch (error) {
+      logger.warn(`补判前的检查项生成异常（继续按"无检查项"判读）：${String((error && error.message) || error)}`)
+    }
+    const result = await judgeInternal({ photoInputs: inputs, body: { storeId: row.storeId, note: row.note, storeName: row.storeName, storeType: row.storeType, provider: row.provider, model: row.model, reworkOf: row.reworkOf ?? null, checklistItems, checklistReasons, checklistCallId }, runId })
     if (!result.ok) return { ok: false, error: result.error, runId }
     void queueDir
     return { ok: true, runId, findingsCount: result.findingsCount, unreadableCount: result.unreadableCount, callId: result.callId, provider: result.provider, model: result.model }

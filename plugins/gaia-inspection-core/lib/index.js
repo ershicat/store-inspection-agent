@@ -182,7 +182,7 @@ export async function apply(ctx, config = {}) {
   // ④ 检查项动态生成（真模型调用；本文件里没有固定清单）
   wrap({
     name: 'inspection_generate_checklist',
-    description: '按本次门店业态与采集内容，由模型动态决定这次要查哪几项，并给出「本次为什么查这几项」的理由列表。真模型调用；模型不可用或输出不合法时返回可诊断错误，不会套用预设清单。',
+    description: '按本次门店业态与采集内容，由模型动态决定这次要查哪几项，并给出「本次为什么查这几项」的理由列表。真模型调用；模型不可用或输出不合法时返回可诊断错误，不会套用预设清单。注意两点：① **采集提交路径会把本次照片作为图像输入一并送入**（generateChecklist 支持 photos），本工具被直接调用时没有图片通道，只能给 photoHints 文字线索；② 本次参考的**检查标准**来自可注入的 standards.json（客户可写区优先，插件目录次之，都没有则用内置参考维度），标准只是参考维度、不是本次清单——模型仍按本次照片与说明增删。',
     parameters: {
       storeId: { type: 'string', description: '门店标识（可空）' },
       storeName: { type: 'string', description: '门店名（可空）' },
@@ -204,12 +204,13 @@ export async function apply(ctx, config = {}) {
       }
       return {
         ok: true,
-        summary: `生成 ${r.data.items.length} 项检查项（${r.provider}/${r.model}，${r.latencyMs}ms，callId=${r.callId}）`,
-        data: { items: r.data.items, reasons: r.data.reasons, callId: r.callId, provider: r.provider, model: r.model, latencyMs: r.latencyMs, savedTo: saved ? saved.id : null },
+        summary: `生成 ${r.data.items.length} 项检查项（${r.provider}/${r.model}，${r.latencyMs}ms，callId=${r.callId}）；参考标准：${r.data.standards.version}`,
+        data: { items: r.data.items, reasons: r.data.reasons, standards: r.data.standards, callId: r.callId, provider: r.provider, model: r.model, latencyMs: r.latencyMs, savedTo: saved ? saved.id : null },
         error: null,
       }
     },
     card: card('检查项动态生成', (r) => r.summary, (r) => [
+      { title: '本次参考的检查标准', lines: [r.data.standards ? `${r.data.standards.version}（来源：${r.data.standards.source === 'injected' ? '客户注入' : r.data.standards.source === 'packaged' ? '随包交付' : '内置兜底'}，维度 ${r.data.standards.count} 条${r.data.standards.path ? '，文件 ' + r.data.standards.path : ''}）` : '（未记录）'] },
       { title: '本次检查项', lines: r.data.items.map((i) => `${i.name}（权重 ${i.weight ?? '未标注'}）｜为什么查：${i.why || '模型未给'} `) },
       { title: '为什么查这几项', lines: [r.data.reasons || '（模型未给理由）'] },
     ]),
@@ -238,10 +239,37 @@ export async function apply(ctx, config = {}) {
   })
 
   // ── 路由 ──
-  const routes = registerRoutes(ctx, () => globalThis[NS_KEY], logger)
-  if (routes.registered.length > 0) logger.info(`已注册路由：${routes.registered.join(', ')}`)
+  // 【真机实测必须项】`webServer` 必须按**声明式依赖**等，不能在 apply 里同步 `ctx.get('webServer')`。
+  // 本包只声明了 `tools`，apply 会早于 dsh-host-webserver 提供服务就绪；而 cordis 的 ctx.get(name)
+  // 对「提供者 fiber 还没 active」的服务一律返回 undefined（kernel: ReflectService.get → _getImpl(name, strict)）。
+  // 后果：lib/routes.js 里六条 /api/gaia-inspection/* 一条都不注册，前端看板/采集/日志全部 404
+  // （真机实测：/api/gaia-inspection/snapshot → 404 "not found"，而同机 UI 包自带路由 200）。
+  // 用 ctx.inject(['webServer'], …)：服务一就绪就注册路由，且**不占用本包工具原有的装载时机**
+  // （未声明 webServer 的环境里工具照旧可用，只是没有 HTTP 口）。
+  const mountRoutes = (routeCtx) => {
+    const routes = registerRoutes(routeCtx, () => globalThis[NS_KEY], logger)
+    if (routes.registered.length > 0) logger.info(`已注册路由：${routes.registered.join(', ')}`)
+    return routes.dispose
+  }
+  let disposeRoutes = () => {}
+  if (ctx && typeof ctx.inject === 'function') {
+    ctx.inject(['webServer'], (webCtx) => {
+      disposeRoutes = mountRoutes(webCtx)
+      return () => {
+        try {
+          disposeRoutes()
+        } catch {
+          /* 幂等 */
+        }
+      }
+    })
+  } else {
+    // 自测垫片没有 cordis 的 inject：退回同步路径（拿不到就由 routes.js 照旧告警）。
+    disposeRoutes = mountRoutes(ctx)
+  }
 
   return () => {
+    disposeRoutes()
     for (const d of reg) {
       try {
         if (typeof d === 'function') d()
