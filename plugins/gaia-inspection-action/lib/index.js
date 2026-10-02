@@ -1,0 +1,454 @@
+// gaia-inspection-action / lib/index.js
+// 宿主半：逾期定时扫描（**进程内真定时器**）+ 整改催办与升级（状态机）。
+// 承担能力词：逾期定时扫描 / 整改催办与升级。
+//
+// 状态机（唯一产生 actions 的地方）：
+//   判断落库 → 生成「整改要求」动作（dueAt = 判断时间 + 严重度 SLA）
+//   → 到期未整改（定时器或「立即扫描」触发）→ 状态置「逾期」+ 生成「催办」动作
+//   → 再过一个升级窗口仍未整改 → 状态置「已升级」+ 生成「升级」动作
+// 定时器是**真的**：apply() 里 setInterval 起进程内定时器，每次触发都把时间戳与扫描结果
+// 追加到 `<数据根>/logs/scan-log.jsonl`（可核对两次真实触发的间隔）；
+// 「立即扫描」只是**互为备份的第二个入口**，走的仍是同一个 scan()。
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { resolveDefineTool } from './gaia-tools.js'
+
+export const name = 'gaia-inspection-action'
+export const inject = ['tools']
+
+export const NS_KEY = '__gaia_inspection__'
+
+/** 整改 SLA（小时）与升级窗口：按严重度给出的业务常量（不是模型判断）。 */
+export const SLA_HOURS = { 高: 2, 中: 8, 低: 24 }
+export const DEFAULT_SLA_HOURS = 8
+/** 过了截止这么久仍未整改 → 升级。 */
+export const ESCALATE_AFTER_HOURS = 8
+
+const OUT_SCHEMA = { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean' }, summary: { type: 'string' }, error: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] } } }
+const jsonRender = (_a, v) => [{ type: 'text', text: JSON.stringify(v, null, 2) }]
+
+function mkLogger(ctx) {
+  const l = ctx && ctx.logger
+  return {
+    info: (m) => (l && typeof l.info === 'function' ? l.info(m) : undefined),
+    warn: (m) => (l && typeof l.warn === 'function' ? l.warn(m) : process.stderr.write(`[gaia-inspection-action] ${m}\n`)),
+    error: (m) => (l && typeof l.error === 'function' ? l.error(m) : process.stderr.write(`[gaia-inspection-action] ${m}\n`)),
+  }
+}
+
+export function slaHoursOf(severity) {
+  const key = String(severity || '').trim()
+  return SLA_HOURS[key] ?? DEFAULT_SLA_HOURS
+}
+
+export function dueAtOf(atIso, severity) {
+  const base = new Date(atIso).getTime()
+  return new Date(base + slaHoursOf(severity) * 3600 * 1000).toISOString()
+}
+
+export async function apply(ctx, config = {}) {
+  void config
+  const logger = mkLogger(ctx)
+  const tools = ctx && ctx.tools
+  if (!tools || typeof tools.register !== 'function') {
+    logger.warn('ctx.tools 不可用：未注册任何工具')
+    return
+  }
+  const defineTool = await resolveDefineTool(ctx)
+  const NSc = () => globalThis[NS_KEY] || undefined
+  const db = () => {
+    const ns = NSc()
+    return ns && ns.db && typeof ns.db.put === 'function' ? ns.db : null
+  }
+
+  const logDir = () => {
+    const d = db()
+    return d && typeof d.logDir === 'function' ? d.logDir() : join(String(process.env.GAIA_INSPECTION_DATA || process.cwd()), 'logs')
+  }
+
+  function tickLog(entry) {
+    try {
+      mkdirSync(logDir(), { recursive: true })
+      appendFileSync(join(logDir(), 'scan-log.jsonl'), `${JSON.stringify(entry)}\n`, 'utf8')
+    } catch {
+      /* 日志失败不影响业务 */
+    }
+  }
+
+  const ticks = []
+
+  /**
+   * 为一张检查单的全部判断生成「整改要求」动作，并把 dueAt 写回检查单与判断。
+   * 由 gaia-inspection-capture 在判断落库后调用（**每条判断之后必须有自动动作**）。
+   */
+  function planForInspection({ inspectionId, findings, at }) {
+    const d = db()
+    if (!d) return { ok: false, error: { code: 'DEPENDENCY_MISSING', message: '需要 ns.db，请确认 gaia-inspection-core 已加载' } }
+    const ins = d.get('inspections', String(inspectionId))
+    if (!ins) return { ok: false, error: { code: 'INSPECTION_NOT_FOUND', message: `检查单不存在：${inspectionId}` } }
+    const list = Array.isArray(findings) ? findings : d.where('findings', (f) => f.inspectionId === ins.id)
+    const atIso = at || ins.createdAt || new Date().toISOString()
+    const created = []
+    let earliest = null
+    for (const f of list) {
+      const dueAt = f.dueAt || dueAtOf(atIso, f.severity)
+      d.put('findings', { ...f, id: f.id, dueAt, status: f.status || 'pending_rectify' })
+      created.push(
+        d.put('actions', {
+          inspectionId: ins.id,
+          findingId: f.id,
+          type: '整改要求',
+          target: f.itemName || null,
+          severity: f.severity || null,
+          dueAt,
+          reason: f.reason || null,
+          createdAt: atIso,
+          source: 'state-machine',
+          actor: '系统',
+          actorIsHuman: false,
+          result: '已派单',
+        }),
+      )
+      if (!earliest || dueAt < earliest) earliest = dueAt
+    }
+    const updated = d.put('inspections', { ...ins, id: ins.id, dueAt: earliest || ins.dueAt || null, status: ins.status === 'rectified' ? 'rectified' : 'pending_rectify' })
+    return { ok: true, data: { inspectionId: ins.id, actionsCreated: created.map((a) => a.id), dueAt: updated.dueAt, rules: { SLA_HOURS, ESCALATE_AFTER_HOURS } } }
+  }
+
+  /**
+   * 扫描一遍：把到期未整改的置「逾期」并生成催办；把已过升级窗口的置「已升级」并生成升级。
+   * 纯状态机 + 表内时间比较，不调模型。
+   */
+  function scan(args = {}) {
+    const d = db()
+    if (!d) return { ok: false, runId: null, status: 'failed', summary: '巡店业务库未就绪', data: null, artifacts: [], traceRef: null, error: { code: 'DEPENDENCY_MISSING', message: '需要 ns.db，请确认 gaia-inspection-core 已加载' } }
+    const nowMs = Date.now()
+    const nowIsoStr = new Date(nowMs).toISOString()
+    const inspections = d.all('inspections')
+    const markedOverdue = []
+    const markedEscalated = []
+    const actionsCreated = []
+    for (const ins of inspections) {
+      if (!ins.dueAt) continue
+      const dueMs = new Date(ins.dueAt).getTime()
+      if (!Number.isFinite(dueMs)) continue
+      const escalateMs = dueMs + ESCALATE_AFTER_HOURS * 3600 * 1000
+      if (ins.status === 'pending_rectify' && dueMs < nowMs) {
+        d.put('inspections', { ...ins, id: ins.id, status: 'overdue', overdueAt: nowIsoStr })
+        for (const f of d.where('findings', (x) => x.inspectionId === ins.id)) {
+          if (f.status === 'pending_rectify') d.put('findings', { ...f, id: f.id, status: 'overdue' })
+        }
+        const a = d.put('actions', {
+          inspectionId: ins.id,
+          findingId: null,
+          type: '催办',
+          target: `${ins.storeName || ins.storeId || '门店'}·整改截止已过`,
+          dueAt: ins.dueAt,
+          reason: `截止时间 ${ins.dueAt} 已过（扫描时间 ${nowIsoStr}）`,
+          createdAt: nowIsoStr,
+          source: args.reason === 'timer' ? 'timer' : 'manual-scan',
+          actor: '系统',
+          actorIsHuman: false,
+          result: '已催办',
+        })
+        markedOverdue.push({ inspectionId: ins.id, dueAt: ins.dueAt, actionId: a.id })
+        actionsCreated.push(a.id)
+      } else if (ins.status === 'overdue' && escalateMs < nowMs) {
+        d.put('inspections', { ...ins, id: ins.id, status: 'escalated', escalatedAt: nowIsoStr })
+        for (const f of d.where('findings', (x) => x.inspectionId === ins.id)) {
+          if (f.status === 'overdue') d.put('findings', { ...f, id: f.id, status: 'escalated' })
+        }
+        const a = d.put('actions', {
+          inspectionId: ins.id,
+          findingId: null,
+          type: '升级',
+          target: `${ins.storeName || ins.storeId || '门店'}·逾期未整改升级`,
+          dueAt: ins.dueAt,
+          reason: `催办后仍未整改，超出升级窗口 ${ESCALATE_AFTER_HOURS} 小时（扫描时间 ${nowIsoStr}）`,
+          createdAt: nowIsoStr,
+          source: args.reason === 'timer' ? 'timer' : 'manual-scan',
+          actor: '系统',
+          actorIsHuman: false,
+          result: '已升级',
+        })
+        markedEscalated.push({ inspectionId: ins.id, dueAt: ins.dueAt, actionId: a.id })
+        actionsCreated.push(a.id)
+      }
+    }
+    return {
+      ok: true,
+      runId: `SCAN-${nowMs}`,
+      status: 'completed',
+      summary: `扫描 ${inspections.length} 张检查单：新逾期 ${markedOverdue.length}、新升级 ${markedEscalated.length}、动作 ${actionsCreated.length}`,
+      data: { scanned: inspections.length, markedOverdue, markedEscalated, actionsCreated, at: nowIsoStr, rules: { SLA_HOURS, ESCALATE_AFTER_HOURS } },
+      artifacts: [{ name: 'scan-log.jsonl', type: 'jsonl', path: join(logDir(), 'scan-log.jsonl') }],
+      traceRef: `scan/${nowMs}`,
+      error: null,
+    }
+  }
+
+  const ns = (globalThis[NS_KEY] ??= {})
+  ns.action = {
+    scan,
+    planForInspection,
+    review: (args) => reviewReceipt(review(args)),
+    status: () => ({
+      ok: true,
+      periodMs: periodMs,
+      tickCount: ticks.length,
+      lastTicks: ticks.slice(-5),
+      logFile: join(logDir(), 'scan-log.jsonl'),
+      rules: { SLA_HOURS, ESCALATE_AFTER_HOURS },
+    }),
+    logDir,
+  }
+
+  /** 前端（fe）用的英文动作码 → 本包内部的中文动作名（两套入口同一套落库语义）。 */
+  const ACTION_CODE = { approve: '通过', reject: '退回并说明', remind: '催办' }
+  const CODE_OF = { 通过: 'review_approve', 退回并说明: 'review_reject', 催办: 'review_remind' }
+
+  /**
+   * 督导的人工动作（画面级说明要求的三态：通过 / 退回并说明 / 催办）。
+   * 与自动动作走**同一张 actions 表**，用 `actor`/`actorIsHuman`/`result` 区分人机来源；
+   * 每次动作都写一条记录（时间 / 操作者 / 结果 / 原因），并回填检查单与判断的状态。
+   * 入参兼容两种写法：`action:'通过'|'退回并说明'|'催办'` 或 `action:'approve'|'reject'|'remind'`。
+   */
+  function review(args = {}) {
+    const d = db()
+    if (!d) return { ok: false, error: { code: 'DEPENDENCY_MISSING', message: '需要 ns.db，请确认 gaia-inspection-core 已加载' } }
+    const rawKind = String(args.action || '').trim()
+    const kind = ACTION_CODE[rawKind] || rawKind
+    const actionCode = CODE_OF[kind] || null
+    let inspectionId = String(args.inspectionId || '').trim()
+    const findingId = args.findingId ? String(args.findingId) : null
+    // 只给 findingId 也认：从判断反查它所属的检查单
+    if (!inspectionId && findingId) {
+      const f = d.get('findings', findingId)
+      if (!f) return { ok: false, error: { code: 'FINDING_NOT_FOUND', message: `没有这条判断：${findingId}` } }
+      inspectionId = String(f.inspectionId || '')
+    }
+    if (!inspectionId) {
+      return { ok: false, error: { code: 'BAD_BODY', message: '至少要给 inspectionId（或只给 findingId 让我反查所属检查单）。' } }
+    }
+    const ins = d.get('inspections', inspectionId)
+    if (!ins) return { ok: false, error: { code: 'INSPECTION_NOT_FOUND', message: `检查单不存在：${inspectionId}` } }
+    const actor = String(args.actor || args.operator || '督导').trim() || '督导'
+    const actorName = String(args.actorName || '').trim()
+    const atIso = String(args.at || '').trim() || new Date().toISOString()
+    const findings = findingId ? d.where('findings', (f) => f.id === findingId && f.inspectionId === ins.id) : d.where('findings', (f) => f.inspectionId === ins.id)
+    if (findingId && findings.length === 0) return { ok: false, error: { code: 'FINDING_NOT_FOUND', message: `该检查单下没有这条判断：${findingId}` } }
+
+    if (kind === '通过') {
+      for (const f of findings) d.put('findings', { ...f, id: f.id, status: 'rectified', rectifiedAt: atIso, rectifiedBy: actorName || actor })
+      const rest = d.where('findings', (f) => f.inspectionId === ins.id && f.status !== 'rectified')
+      const allDone = rest.length === 0
+      const updated = d.put('inspections', {
+        ...ins,
+        id: ins.id,
+        status: allDone ? 'rectified' : ins.status,
+        rectifiedAt: allDone ? atIso : ins.rectifiedAt || null,
+        rectifiedBy: actorName || actor,
+      })
+      const a = d.put('actions', {
+        inspectionId: ins.id,
+        findingId,
+        type: '通过',
+        actionCode,
+        target: findingId ? (findings[0].itemName || findingId) : `${ins.storeName || ins.storeId || '门店'}·本次整改`,
+        reason: String(args.reason || '').trim() || null,
+        createdAt: atIso,
+        source: 'supervisor',
+        actor,
+        actorName: actorName || null,
+        actorIsHuman: true,
+        result: '通过',
+      })
+      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: updated.status, passedFindings: findings.map((f) => f.id), remainingUnrectified: rest.length } }
+    }
+
+    if (kind === '退回并说明') {
+      const reason = String(args.reason || '').trim()
+      if (!reason) return { ok: false, error: { code: 'REASON_REQUIRED', message: '退回必须带说明文本（reason）：界面要把这段说明写给店长看。' } }
+      const hours = Number(args.newDueHours) > 0 ? Number(args.newDueHours) : null
+      const dueAt = hours ? new Date(Date.now() + hours * 3600 * 1000).toISOString() : null
+      for (const f of findings) {
+        d.put('findings', { ...f, id: f.id, status: 'pending_rectify', dueAt: dueAt || f.dueAt || null, rejectedAt: atIso, rejectedReason: reason })
+      }
+      const updated = d.put('inspections', { ...ins, id: ins.id, status: 'pending_rectify', dueAt: dueAt || ins.dueAt || null, rejectedAt: atIso })
+      const a = d.put('actions', {
+        inspectionId: ins.id,
+        findingId,
+        type: '退回并说明',
+        actionCode,
+        target: findingId ? (findings[0].itemName || findingId) : `${ins.storeName || ins.storeId || '门店'}·本次整改`,
+        reason,
+        dueAt: updated.dueAt,
+        createdAt: atIso,
+        source: 'supervisor',
+        actor,
+        actorName: actorName || null,
+        actorIsHuman: true,
+        result: '退回',
+      })
+      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: updated.status, dueAt: updated.dueAt, rejectedFindings: findings.map((f) => f.id) } }
+    }
+
+    if (kind === '催办') {
+      const reason = String(args.reason || '').trim() || `督导人工催办（当前状态：${ins.status}）`
+      const a = d.put('actions', {
+        inspectionId: ins.id,
+        findingId,
+        type: '催办',
+        actionCode,
+        target: findingId ? (findings[0].itemName || findingId) : `${ins.storeName || ins.storeId || '门店'}·整改催办`,
+        reason,
+        dueAt: ins.dueAt || null,
+        createdAt: atIso,
+        source: 'supervisor',
+        actor,
+        actorName: actorName || null,
+        actorIsHuman: true,
+        result: '已催办',
+      })
+      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: ins.status, dueAt: ins.dueAt || null } }
+    }
+
+    return { ok: false, error: { code: 'BAD_ACTION', message: 'action 只能是 通过 / 退回并说明 / 催办（或 approve / reject / remind）' } }
+  }
+
+  /**
+   * 把 review() 的结果包成统一回执形状（总工程师拍板）：{ok, runId, status, summary, data, artifacts, traceRef, error}
+   */
+  function reviewReceipt(r) {
+    if (!r.ok) {
+      return { ok: false, runId: null, status: 'failed', summary: `人工动作未记录：${r.error.message}`, data: null, artifacts: [], traceRef: null, error: r.error }
+    }
+    const a = r.data.action
+    return {
+      ok: true,
+      runId: a.id,
+      status: 'completed',
+      summary: `已记录人工动作「${a.type}」（${a.actionCode}）：操作者 ${a.actor}${a.actorName ? '/' + a.actorName : ''}｜结果 ${a.result}｜检查单状态 ${r.data.inspectionStatus}`,
+      data: r.data,
+      // 顶层 action 便于前端直接取（总工程师给的形状）：{id, type, target, createdAt, reason}
+      action: { id: a.id, type: a.type, actionCode: a.actionCode, target: a.target, createdAt: a.createdAt, reason: a.reason, actor: a.actor, actorName: a.actorName, actorIsHuman: a.actorIsHuman, result: a.result },
+      artifacts: [],
+      traceRef: `review/${a.actionCode}/${a.id}`,
+      error: null,
+    }
+  }
+
+  const reg = []
+  const wrap = (opts) => {
+    const def = { ...opts, output: { schema: OUT_SCHEMA, render: jsonRender } }
+    if (opts.card) {
+      def.presentResult = opts.card
+      delete def.card
+    }
+    reg.push(tools.register(defineTool(def)))
+  }
+
+  wrap({
+    name: 'inspection_scan_overdue',
+    description: '立即扫描一遍逾期项（与后台真定时器互为备份，走的是同一个状态机）：到期未整改的检查单置「逾期」并生成催办动作，已过升级窗口的置「已升级」并生成升级动作。返回扫描了几张、新逾期/新升级/新动作各几条。',
+    parameters: {
+      reason: { type: 'string', description: '可选：触发原因，默认 manual（定时器触发时为 timer）' },
+    },
+    async execute(args) {
+      const r = scan({ reason: (args && args.reason) || 'manual' })
+      return { ok: r.ok, summary: r.summary, data: r.data, error: r.error, runId: r.runId, status: r.status, artifacts: r.artifacts, traceRef: r.traceRef }
+    },
+  })
+
+  wrap({
+    name: 'inspection_plan_actions',
+    description: '为一张检查单的全部判断生成整改要求动作：按严重度算截止时间（高 2h / 中 8h / 低 24h），写回 findings.dueAt 与 inspections.dueAt，并落 actions 记录。每条判断之后必须有自动动作，本工具就是那个动作的生成口。',
+    parameters: {
+      inspectionId: { type: 'string', required: true, description: '检查单 id' },
+    },
+    async execute(args) {
+      const r = planForInspection({ inspectionId: String(args.inspectionId || '') })
+      if (!r.ok) return { ok: false, summary: `动作生成失败：${r.error.code}`, data: null, error: r.error }
+      return { ok: true, summary: `为 ${r.data.inspectionId} 生成 ${r.data.actionsCreated.length} 条整改要求（最早截止 ${r.data.dueAt}）`, data: r.data, error: null }
+    },
+  })
+
+  wrap({
+    name: 'inspection_action_timeline',
+    description: '读某张检查单（或全部）的整改动作时间线：整改要求 → 催办 → 升级，含生成时间、目标、触发原因与截止时间。供看板把「逾期与催办·升级痕迹」渲染在同屏。',
+    parameters: {
+      inspectionId: { type: 'string', description: '可选：只看这张检查单；不给则返回全部' },
+    },
+    async execute(args) {
+      const d = db()
+      if (!d) return { ok: false, summary: '巡店业务库未就绪', data: null, error: { code: 'DEPENDENCY_MISSING', message: '需要 ns.db' } }
+      const id = args.inspectionId ? String(args.inspectionId) : ''
+      let rows = d.all('actions')
+      if (id) rows = rows.filter((a) => a.inspectionId === id)
+      rows = rows.slice().sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+      return { ok: true, summary: `动作 ${rows.length} 条${id ? `（检查单 ${id}）` : ''}`, data: { inspectionId: id || null, total: rows.length, actions: rows }, error: null }
+    },
+  })
+
+  wrap({
+    name: 'inspection_review_action',
+    description: '督导的人工处置动作（与自动动作同一张 actions 表，用 actor/result 区分人机）：action=通过（认可整改，检查单/判断置已整改）｜退回并说明（**必须带 reason 说明文本**，判断状态退回待整改并按 newDueHours 重算截止）｜催办（写一条人工催办记录，不改状态）。每次动作都落一条记录：时间 / 操作者 / 结果 / 原因。',
+    parameters: {
+      action: { type: 'string', enum: ['通过', '退回并说明', '催办', 'approve', 'reject', 'remind'], required: true, description: '动作类型（中文三态逐字：通过/退回并说明/催办；也接受 approve/reject/remind）' },
+      inspectionId: { type: 'string', required: true, description: '检查单 id' },
+      findingId: { type: 'string', description: '可选：只针对某条判断；不给则针对该检查单的全部判断' },
+      reason: { type: 'string', description: '退回并说明**必填**的说明文本；通过/催办可选' },
+      newDueHours: { type: 'number', description: '可选（仅退回）：新的整改时限小时数' },
+      actor: { type: 'string', description: '可选：操作者角色，默认「督导」；也接受 operator 字段' },
+      actorName: { type: 'string', description: '可选：操作者名称（演示用，不做账号体系）' },
+    },
+    async execute(args) {
+      return reviewReceipt(review(args || {}))
+    },
+  })
+
+  wrap({
+    name: 'inspection_scan_status',
+    description: '查看定时扫描的运行事实：周期毫秒、已触发次数、最近几次触发的真实时间戳与扫描结果、以及扫描日志文件的绝对路径（用于核对"定时器是真的是按周期跑的"）。',
+    parameters: {},
+    async execute() {
+      const st = ns.action.status()
+      return { ok: true, summary: `定时器周期 ${st.periodMs}ms，已触发 ${st.tickCount} 次`, data: st, error: null }
+    },
+  })
+
+  // ── 真定时器 ────────────────────────────────────────────────────────────────
+  const periodMs = Math.max(0, Number(process.env.GAIA_INSPECTION_SCAN_MS ?? 60000))
+  let timer = null
+  if (periodMs > 0) {
+    timer = setInterval(() => {
+      try {
+        const r = scan({ reason: 'timer' })
+        const tick = { tick: ticks.length + 1, ts: new Date().toISOString(), scanned: r.data ? r.data.scanned : null, markedOverdue: r.data ? r.data.markedOverdue.length : null, actionsCreated: r.data ? r.data.actionsCreated.length : null, ok: r.ok }
+        ticks.push(tick)
+        tickLog({ event: 'timer-tick', ...tick })
+        if (tick.markedOverdue > 0) logger.info(`[逾期扫描] 第 ${tick.tick} 次触发：新逾期 ${tick.markedOverdue} 条`)
+      } catch (error) {
+        logger.warn(`[逾期扫描] 异常：${String((error && error.message) || error)}`)
+      }
+    }, periodMs)
+    if (timer && typeof timer.unref === 'function') timer.unref()
+    logger.info(`逾期定时扫描已启动：每 ${periodMs}ms 一次（日志 ${join(logDir(), 'scan-log.jsonl')}）`)
+  } else {
+    logger.warn('GAIA_INSPECTION_SCAN_MS=0：定时扫描未启动（只能靠「立即扫描」手动触发）')
+  }
+
+  return () => {
+    if (timer) clearInterval(timer)
+    for (const dr of reg) {
+      try {
+        if (typeof dr === 'function') dr()
+      } catch {
+        /* 幂等 */
+      }
+    }
+    const g = globalThis[NS_KEY]
+    if (g && g.action && typeof g.action.scan === 'function') delete g.action
+  }
+}

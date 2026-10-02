@@ -1,0 +1,7 @@
+# gaia-inspection-capture bundle patch：把本包插件行插入 web 插件名册。
+# host 半（lib/index.js）：门店照片视觉判断（真多模态调用，走宿主 ctx.llm.stream）、
+# 断网降级与待判队列、照片缩略与附件预览；对外发布 ns.capture 供 core 的固定动作口转发。
+# 行 id 唯一，不与其它包重复。
+- insert:
+    - id: gaia-inspection-capture
+      name: "@gaia/dsh-inspection-capture"

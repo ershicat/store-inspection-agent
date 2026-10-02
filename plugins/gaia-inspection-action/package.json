@@ -1,0 +1,29 @@
+{
+  "name": "@gaia/dsh-inspection-action",
+  "version": "0.1.0",
+  "description": "门店督导·整改动作：进程内真定时器按周期扫描逾期项、把状态置为逾期/已升级，并生成催办与升级动作记录（整改要求 → 催办 → 升级三态状态机）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "manifest.json",
+    "README.md"
+  ],
+  "license": "UNLICENSED",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}

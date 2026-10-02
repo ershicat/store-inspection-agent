@@ -1,0 +1,46 @@
+{
+  "name": "gaia-inspection-capture-ui",
+  "version": "0.1.0",
+  "description": "门店督导 — 店长端界面包：门店自查采集入口（输入区常驻入口 + 极简采集浮层：照片≤6 + 一句话 + 提交回执）与角色视图切换（店长端↔督导端，演示用视图切换）。纯浏览器 client 半。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": "./client/client.js",
+    "./manifest.json": "./manifest.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "manifest.json",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "gaia",
+    "inspection",
+    "capture",
+    "门店自查采集入口",
+    "角色视图切换"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/dsh-web-server": "*"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

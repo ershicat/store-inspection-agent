@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 960" width="1400" height="960">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5A5A5A"/>
+    </marker>
+    <marker id="arD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#A8622A"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="960" fill="#FFFFFF"/>
+
+  <text x="40" y="48" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#1E1E1E">门店巡店自查 Agent · 工作流图</text>
+  <text x="40" y="78" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="14" fill="#666666">一次交班提交，从采集到复核到升级的完整链路；橙色节点＝人在环介入点；虚线＝校验不通过的回路与日志回写</text>
+
+  <rect x="40" y="200" width="190" height="90" rx="8" fill="#FFE9C7" stroke="#A8622A" stroke-width="1.5"/>
+  <text x="135" y="230" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">① 触发</text>
+  <text x="135" y="254" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">交接班时</text>
+  <text x="135" y="274" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">（门店原本就要做）</text>
+
+  <rect x="255" y="200" width="190" height="90" rx="8" fill="#FFE9C7" stroke="#A8622A" stroke-width="1.5"/>
+  <text x="350" y="230" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">② 采集</text>
+  <text x="350" y="254" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">拍照 + 一句话</text>
+  <text x="350" y="274" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">（店长提交）</text>
+
+  <rect x="470" y="200" width="190" height="90" rx="8" fill="#EEF3F7" stroke="#3A5A78" stroke-width="1.5"/>
+  <text x="565" y="230" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">③ 规划</text>
+  <text x="565" y="254" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">模型定本次检查项</text>
+  <text x="565" y="274" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">并说明为什么查这几项</text>
+
+  <rect x="685" y="200" width="190" height="90" rx="8" fill="#EEF3F7" stroke="#A8622A" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="780" y="230" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">④ 工具调用</text>
+  <text x="780" y="254" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">视觉理解</text>
+  <text x="780" y="274" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#A8622A" text-anchor="middle">（需联网调模型）</text>
+
+  <polygon points="995,200 1090,245 995,290 900,245" fill="#EEF3F7" stroke="#3A5A78" stroke-width="1.5"/>
+  <text x="995" y="240" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="14" font-weight="700" fill="#1E1E1E" text-anchor="middle">⑤ 校验</text>
+  <text x="995" y="262" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#333333" text-anchor="middle">证据回指？</text>
+
+  <rect x="40" y="450" width="190" height="90" rx="8" fill="#EEF3F7" stroke="#3A5A78" stroke-width="1.5"/>
+  <text x="135" y="480" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">⑥ 产出</text>
+  <text x="135" y="504" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">判断 / 依据 / 证据</text>
+  <text x="135" y="524" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">整改要求 + 截止时间</text>
+
+  <rect x="255" y="450" width="190" height="90" rx="8" fill="#FFE9C7" stroke="#A8622A" stroke-width="1.5"/>
+  <text x="350" y="480" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">⑦ 人在环</text>
+  <text x="350" y="504" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">督导复核</text>
+  <text x="350" y="524" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">通过 / 退回 / 催办</text>
+
+  <rect x="470" y="450" width="190" height="90" rx="8" fill="#EEF3F7" stroke="#3A5A78" stroke-width="1.5"/>
+  <text x="565" y="480" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">⑧ 动作</text>
+  <text x="565" y="504" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">整改单下发</text>
+  <text x="565" y="524" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">带截止时间与后果</text>
+
+  <rect x="685" y="450" width="190" height="90" rx="8" fill="#FFE9C7" stroke="#A8622A" stroke-width="1.5"/>
+  <text x="780" y="480" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">⑨ 闭环</text>
+  <text x="780" y="504" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">到期未整改 → 升级</text>
+  <text x="780" y="524" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">区域经理接收</text>
+
+  <rect x="800" y="700" width="350" height="90" rx="8" fill="#EEF3F7" stroke="#3A5A78" stroke-width="1.5"/>
+  <text x="975" y="730" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1E1E1E" text-anchor="middle">⑩ 记忆回写（可追溯）</text>
+  <text x="975" y="754" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333" text-anchor="middle">调用日志 + 提交记录 + 动作记录</text>
+  <text x="975" y="774" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#777777" text-anchor="middle">（评委要看的 API 调用记录在这里）</text>
+
+  <path d="M230,245 H255" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M445,245 H470" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M660,245 H685" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M875,245 H900" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <path d="M940,268 V380 H565 V292" fill="none" stroke="#A8622A" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arD)"/>
+  <text x="600" y="372" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#A8622A">不通过：丢弃该项 / 按失败处理，回到规划重做</text>
+
+  <path d="M995,290 V420 H135 V450" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="1010" y="330" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#555555">通过</text>
+
+  <path d="M230,495 H255" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M445,495 H470" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M660,495 H685" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M880,540 V700" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="892" y="660" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#555555">留痕</text>
+
+  <path d="M1150,745 H1320 V170 H135 V194" fill="none" stroke="#5A5A5A" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="1180" y="500" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#555555" transform="rotate(90 1180 500)">闭环：下次可核对</text>
+
+  <path d="M780,290 V330 H1120 V650 H1000 V700" fill="none" stroke="#A8622A" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arD)"/>
+  <text x="880" y="324" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="12" fill="#A8622A">每次调用都落日志</text>
+
+  <rect x="40" y="880" width="1320" height="64" rx="8" fill="#FAFAFA" stroke="#DDDDDD"/>
+  <rect x="56" y="900" width="16" height="16" fill="#FFE9C7" stroke="#A8622A"/>
+  <text x="80" y="914" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333">人在环介入点（店长 / 督导 / 区域经理）</text>
+  <rect x="340" y="900" width="16" height="16" fill="#EEF3F7" stroke="#3A5A78"/>
+  <text x="364" y="914" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333">Agent 自动环节</text>
+  <rect x="500" y="900" width="16" height="16" fill="#EEF3F7" stroke="#A8622A" stroke-dasharray="4 3"/>
+  <text x="524" y="914" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#333333">需要联网</text>
+  <text x="640" y="914" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" fill="#555555">橙色虚线箭头＝校验不通过的回路 / 调用日志回写</text>
+  <text x="1090" y="914" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" font-size="13" font-weight="700" fill="#1E1E1E">节点 10 个 / 连线 12 条</text>
+</svg>

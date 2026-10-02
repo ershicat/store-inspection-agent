@@ -1,0 +1,30 @@
+{
+  "name": "@gaia/dsh-inspection-core",
+  "version": "0.1.0",
+  "description": "门店督导·巡店数据落库与模型调用日志留存：stores/inspections/findings/evidences/actions/model_calls 六张表的本地库读写、模型调用日志在调用发生时刻落盘、检查项动态生成（真模型调用），并对外提供只读快照/证据/模型调用日志三条路由。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "manifest.json",
+    "README.md"
+  ],
+  "license": "UNLICENSED",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-llm": "*"
+  }
+}

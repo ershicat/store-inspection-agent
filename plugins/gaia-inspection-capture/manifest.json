@@ -1,0 +1,18 @@
+{
+  "name": "门店照片判读与采集队列",
+  "npmPackage": "@gaia/dsh-inspection-capture",
+  "version": "0.1.0",
+  "description": "门店照片的真实多模态模型判断（问题项/严重度/依据文字/圈框坐标，模糊照片直说看不清）、离线仅排队联网自动补判的待判队列、照片原图保留与缩略图生成。",
+  "keywords": [
+    "门店照片视觉判断",
+    "断网降级与待判队列",
+    "照片缩略与附件预览"
+  ],
+  "tools": [
+    "inspection_judge_photos",
+    "inspection_submit_selfcheck",
+    "inspection_pending_queue",
+    "inspection_thumb",
+    "inspection_offline_mode"
+  ]
+}

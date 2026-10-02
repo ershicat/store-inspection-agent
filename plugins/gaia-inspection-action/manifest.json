@@ -1,0 +1,17 @@
+{
+  "name": "逾期扫描与整改动作",
+  "npmPackage": "@gaia/dsh-inspection-action",
+  "version": "0.1.0",
+  "description": "进程内真定时器按周期扫描超期未整改项，把检查单与判断置为逾期、再置为已升级，并为状态变更生成催办/升级动作记录（整改要求→催办→升级三态）；另含督导人工动作（通过 / 退回并说明 / 催办）在同一张 actions 表里落记录。",
+  "keywords": [
+    "逾期定时扫描",
+    "整改催办与升级"
+  ],
+  "tools": [
+    "inspection_scan_overdue",
+    "inspection_plan_actions",
+    "inspection_action_timeline",
+    "inspection_review_action",
+    "inspection_scan_status"
+  ]
+}

@@ -1,0 +1,9 @@
+# gaia-inspection-core bundle patch：把本包插件行插入 web 插件名册。
+# host 半（lib/index.js）：六张表本地库（巡店数据落库）+ 模型调用日志留存 +
+# 检查项动态生成（真模型调用），并注册三条只读路由
+#   GET /api/gaia-inspection/snapshot | /evidence?id= | /model-calls
+# 以及前端按钮需要的写入口（POST /submit | /scan）与图片读取口（GET /photo?id=）。
+# 行 id 唯一，不与其它包重复。
+- insert:
+    - id: gaia-inspection-core
+      name: "@gaia/dsh-inspection-core"

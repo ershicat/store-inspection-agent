@@ -1,0 +1,9 @@
+# gaia-inspection-capture-ui bundle patch：把本插件行插进 web 插件名册。
+# 一行同时挂两半：
+#   宿主半（lib/index.js）—— 只读的提交回执内省口（GET /api/gaia-inspection-capture-ui/last-submit
+#   与 GET /api/gaia-inspection-capture-ui/receipts），客户侧不产生任何业务数据；
+#   浏览器半（client/client.js）—— 输入区「提交自查」胶囊 + 采集浮层 + 角色视图切换。
+# 业务数据一律来自 gaia-inspection-core 的 /api/gaia-inspection/*，本包不重复实现。
+- insert:
+    - id: gaia-inspection-capture-ui
+      name: gaia-inspection-capture-ui

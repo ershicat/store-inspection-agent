@@ -1,0 +1,10 @@
+# gaia-inspection-oversight-ui bundle patch：把本插件行插进 web 插件名册。
+# 一行同时挂两半：
+#   宿主半（lib/index.js）—— 只读自检口 GET /api/gaia-inspection-oversight-ui/selfcheck；
+#   浏览器半（client/client.js）—— 督导端不遮挡右侧面板（左右两栏：列表 + 详情；「为什么查这几项」浅底块；
+#   检查项卡含「回看原图」的**面板内放大区**（不是浮层）；动作行 通过/退回并说明/催办）
+#   + 右侧栏「模型调用日志」独立 tab + 会话 header 三个入口（看板 / 立即扫描 / 模型调用日志）。
+# 业务数据一律来自 gaia-inspection-core 的 /api/gaia-inspection/*，本包不重复实现后端语义。
+- insert:
+    - id: gaia-inspection-oversight-ui
+      name: gaia-inspection-oversight-ui

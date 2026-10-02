@@ -1,0 +1,7 @@
+# gaia-inspection-demo bundle patch：把本包插件行插入 web 插件名册。
+# host 半（lib/index.js）：演示样例载入（达标态/问题态/逾期态/看不清态，合成示例图）
+# 与状态重置（清业务表与待判队列，**保留 model_calls 与 stores**）。
+# 对外发布 ns.demo。行 id 唯一，不与其它包重复。
+- insert:
+    - id: gaia-inspection-demo
+      name: "@gaia/dsh-inspection-demo"

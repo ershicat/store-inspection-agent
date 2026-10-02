@@ -1,0 +1,13 @@
+{
+  "name": "演示样例与状态重置",
+  "npmPackage": "@gaia/dsh-inspection-demo",
+  "version": "0.1.0",
+  "description": "现场演示样例（同一门店达标态与问题态、逾期态、看不清态；合成示例图并明确标注未调用模型）与状态重置（只清业务表与待判队列，model_calls 一行不动）。",
+  "keywords": [
+    "演示样例与状态重置"
+  ],
+  "tools": [
+    "inspection_load_samples",
+    "inspection_reset_demo"
+  ]
+}

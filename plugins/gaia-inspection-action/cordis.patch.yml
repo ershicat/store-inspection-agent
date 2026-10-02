@@ -1,0 +1,7 @@
+# gaia-inspection-action bundle patch：把本包插件行插入 web 插件名册。
+# host 半（lib/index.js）：逾期定时扫描（进程内真 setInterval，周期 GAIA_INSPECTION_SCAN_MS，
+# 默认 60000ms）+ 整改催办与升级状态机；对外发布 ns.action（含 scan / planForInspection）。
+# 行 id 唯一，不与其它包重复。
+- insert:
+    - id: gaia-inspection-action
+      name: "@gaia/dsh-inspection-action"

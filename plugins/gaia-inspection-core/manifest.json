@@ -1,0 +1,18 @@
+{
+  "name": "巡店数据与模型调用留痕",
+  "npmPackage": "@gaia/dsh-inspection-core",
+  "version": "0.1.0",
+  "description": "巡店业务的本地库（六张表）与模型调用日志：每次模型调用在调用发生时刻写入一条真实记录；检查项由模型按本次输入动态生成并给出理由列表；对看板提供只读快照、证据、模型调用日志三条路由。",
+  "keywords": [
+    "巡店数据落库",
+    "模型调用日志留存",
+    "检查项动态生成"
+  ],
+  "tools": [
+    "inspection_record_save",
+    "inspection_query",
+    "inspection_counts",
+    "inspection_generate_checklist",
+    "inspection_model_calls"
+  ]
+}

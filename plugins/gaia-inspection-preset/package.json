@@ -1,0 +1,13 @@
+{
+  "name": "gaia-inspection-preset",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "盖亚预设 inspection（门店督导）—— 0.2.0 声明式预设 bundle：连锁品牌门店巡店自查的判断引擎人设",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

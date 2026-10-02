@@ -1,0 +1,7 @@
+# gaia-inspection-registry bundle patch：把本包插件行插入 web 插件名册。
+# host 半（lib/index.js）：两家示例门店的静态档案（只读），种子写入 core 的 stores 表；
+# 对外发布 ns.registry（listStores / getStore / ensureSeeded）。
+# 本包只有 list / get 两个工具，没有增删改。行 id 唯一。
+- insert:
+    - id: gaia-inspection-registry
+      name: "@gaia/dsh-inspection-registry"

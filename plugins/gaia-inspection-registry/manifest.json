@@ -1,0 +1,13 @@
+{
+  "name": "门店档案（静态示例）",
+  "npmPackage": "@gaia/dsh-inspection-registry",
+  "version": "0.1.0",
+  "description": "两家示例门店的静态档案（快餐档口 / 正餐堂食，中性示例名），含业态、营业时段、默认检查维度倾向与关注重点；只读，无增删改。",
+  "keywords": [
+    "门店档案管理"
+  ],
+  "tools": [
+    "inspection_list_stores",
+    "inspection_get_store"
+  ]
+}
