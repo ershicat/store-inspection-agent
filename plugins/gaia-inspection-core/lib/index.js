@@ -189,6 +189,7 @@ export async function apply(ctx, config = {}) {
       storeType: { type: 'string', description: '业态：快餐档口 / 正餐堂食 等' },
       note: { type: 'string', description: '本次采集时店长附的一句话说明' },
       photoHints: { type: 'array', items: { type: 'string' }, description: '本次照片的机器可见线索（原样给出，未做判断）' },
+      mustItems: { type: 'array', items: { type: 'string' }, description: '可选：**整改回拍复核**时必须逐项复核的项名（原单里还没通过的判断项）。给了就要求一项不漏地列入本次检查项，模型漏列时后端按同一口径硬补（逐项对账），同时仍允许按本次照片补充新项。' },
       inspectionId: { type: 'string', description: '可选：把生成的检查项写回该检查单' },
       provider: { type: 'string', description: '可选：显式指定 provider（默认用宿主当前模型选择）' },
       model: { type: 'string', description: '可选：显式指定 model' },
@@ -204,16 +205,19 @@ export async function apply(ctx, config = {}) {
       }
       return {
         ok: true,
-        summary: `生成 ${r.data.items.length} 项检查项（${r.provider}/${r.model}，${r.latencyMs}ms，callId=${r.callId}）；参考标准：${r.data.standards.version}`,
-        data: { items: r.data.items, reasons: r.data.reasons, standards: r.data.standards, callId: r.callId, provider: r.provider, model: r.model, latencyMs: r.latencyMs, savedTo: saved ? saved.id : null },
+        summary: `生成 ${r.data.items.length} 项检查项（${r.provider}/${r.model}，${r.latencyMs}ms，callId=${r.callId}）；参考标准：${r.data.standards.version}${r.data.mustItems && r.data.mustItems.required.length > 0 ? `；整改回拍复核项 ${r.data.mustItems.required.length} 条（后端补齐 ${r.data.mustItems.appended.length} 条）` : ''}`,
+        data: { items: r.data.items, reasons: r.data.reasons, standards: r.data.standards, mustItems: r.data.mustItems || null, callId: r.callId, provider: r.provider, model: r.model, latencyMs: r.latencyMs, savedTo: saved ? saved.id : null },
         error: null,
       }
     },
     card: card('检查项动态生成', (r) => r.summary, (r) => [
       { title: '本次参考的检查标准', lines: [r.data.standards ? `${r.data.standards.version}（来源：${r.data.standards.source === 'injected' ? '客户注入' : r.data.standards.source === 'packaged' ? '随包交付' : '内置兜底'}，维度 ${r.data.standards.count} 条${r.data.standards.path ? '，文件 ' + r.data.standards.path : ''}）` : '（未记录）'] },
+      r.data.mustItems && r.data.mustItems.required.length > 0
+        ? { title: '整改回拍复核项（口径：逐项对账 + 可补新项）', lines: r.data.mustItems.required.map((t) => `· ${t}${r.data.mustItems.appended.indexOf(t) !== -1 ? '（模型漏列，后端已补齐）' : '（模型已列入）'}`) }
+        : null,
       { title: '本次检查项', lines: r.data.items.map((i) => `${i.name}（权重 ${i.weight ?? '未标注'}）｜为什么查：${i.why || '模型未给'} `) },
       { title: '为什么查这几项', lines: [r.data.reasons || '（模型未给理由）'] },
-    ]),
+    ].filter(Boolean)),
   })
 
   // ⑤ 模型调用日志查询（留存的读取面）

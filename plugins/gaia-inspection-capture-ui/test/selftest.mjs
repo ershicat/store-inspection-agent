@@ -7,7 +7,7 @@
 //     + __gaia_inspection_ui__ {version:1, getScreen, subscribe}（店长端屏组件，供督导包外壳内嵌）。
 //   · 屏 A = CaptureScreen：整屏两栏（左 .gicu-hero 照片投放区＝视觉主角 / 右 .gicu-form），无手机壳浮层。
 //   · CSS 令牌与硬口径（间距/圆角同心/两级阴影/四态/具名 transition/按钮 44px/禁用灰化/tabular-nums/
-//     图片 1px 纯黑 10% outline/禁 `·` 拼元数据/禁按钮 `→`）逐条机检。
+//     图片 1px 令牌色 10% outline/禁 `·` 拼元数据/禁按钮 `→`）逐条机检。
 //
 // 覆盖：① 宿主半 import / inject / 只读内省路由；② client 装载契约；③ **在最小 React/DOM/fetch 垫片下把屏 A
 // 渲染出来并跑真实提交流程**（垫片忠实模拟 useSyncExternalStore 的 Object.is 契约，不许退回旧垫片）；
@@ -396,8 +396,8 @@ check('屏通道退订后不再被通知', uiPinged === 1, String(uiPinged))
 const cssText = styleEls.map((el) => el.textContent).join('\n')
 check('样式已注入（<style data-plugin>）', cssText.indexOf('.gicu-root') !== -1, String(cssText.length))
 const TOKENS = [
-  '--gi-bg:#EEF0F4', '--gi-card:#FFFFFF', '--gi-ink:#101319', '--gi-ink-2:#5D6472', '--gi-ink-3:#8A909C', '--gi-line:#E2E5EB',
-  '--gi-accent:#1D4ED8', '--gi-dark:#161A20', '--gi-warn-bg:#FFF3E6', '--gi-warn-ink:#9A4A00',
+  '--gi-bg:#F4F0E8', '--gi-card:#FFFFFF', '--gi-ink:#17191D', '--gi-ink-2:#66635E', '--gi-ink-3:#8A909C', '--gi-line:#DED8CE',
+  '--gi-accent:#A84300', '--gi-dark:#111318', '--gi-warn-bg:#FFF3E6', '--gi-warn-ink:#9A4A00',
   '--gi-r-card:18px', '--gi-r-block:12px', '--gi-r-ctl:10px', '--gi-r-pill:999px',
   '--gi-s1:4px', '--gi-s2:8px', '--gi-s3:12px', '--gi-s4:16px', '--gi-s6:24px', '--gi-s8:32px', '--gi-s10:40px',
   '--gi-shadow-card:0 2px 8px rgba(16,19,25,.06)', '--gi-shadow-pop:0 10px 28px rgba(16,19,25,.18)',
@@ -442,11 +442,11 @@ check('禁用态一律灰化（不保留品牌色）', cssText.indexOf('.gicu-bt
 check('动效写属性名（transition-property）且无 transition: all', cssText.indexOf('transition-property') !== -1 && cssText.indexOf('transition: all') === -1, '')
 check('prefers-reduced-motion 降级', cssText.indexOf('prefers-reduced-motion') !== -1, '')
 check('动态数字 tabular-nums（.gicu-num）', cssText.indexOf('tabular-nums') !== -1 && cssText.indexOf('.gicu-num') !== -1, '')
-check('图片 outline 是纯黑 10% + offset -1px', cssText.indexOf('outline:1px solid rgba(0,0,0,.1)') !== -1 && cssText.indexOf('outline-offset:-1px') !== -1, '')
+check('B2 图片 outline 用令牌色 rgba(16,19,25,.10)（不再用纯黑）+ offset -1px', cssText.indexOf('outline:1px solid rgba(16,19,25,.10)') !== -1 && cssText.indexOf('outline-offset:-1px') !== -1, '')
 const blackUsages = cssText.match(/rgba\(0,0,0,[^)]*\)/g) || []
-check('除图片 1px 纯黑 10% 外不用纯黑', blackUsages.every((v) => v === 'rgba(0,0,0,.1)') && cssText.indexOf('#000') === -1, blackUsages.join(','))
+check('B2 全表不用纯黑（rgba(0,0,0,…) 0 处、#000 0 处）', blackUsages.length === 0 && cssText.indexOf('#000') === -1, blackUsages.join(','))
 check('文案排版 text-wrap（标题 balance / 正文 pretty）', cssText.indexOf('text-wrap:balance') !== -1 && cssText.indexOf('text-wrap:pretty') !== -1, '')
-check('滚动条细且无彩色', cssText.indexOf('scrollbar-width:thin') !== -1 && cssText.indexOf('scrollbar-color:#C7CCD6 transparent') !== -1, '')
+check('滚动条细且无彩色', cssText.indexOf('scrollbar-width:thin') !== -1 && cssText.indexOf('scrollbar-color:var(--gi-track) transparent') !== -1, '')
 const NEW_CLASSES = ['gicu-root', 'gicu-screen', 'gicu-hero', 'gicu-form', 'gicu-banner', 'gicu-count', 'gicu-row', 'gicu-lbl', 'gicu-btn', 'gicu-dockbtn', 'gicu-input', 'gicu-note', 'gicu-select', 'gicu-num', 'gicu-state', 'gicu-skel', 'gicu-line', 'gicu-chip', 'gicu-actions', 'gicu-grow', 'gicu-scroll']
 check('§4 类名齐备', NEW_CLASSES.every((cls) => cssText.indexOf('.' + cls) !== -1), NEW_CLASSES.filter((c) => cssText.indexOf('.' + c) === -1).join(' '))
 const DEAD_CLASSES = ['gicu-panel', 'gicu-phone', 'gicu-notch', 'gicu-body', 'gicu-seg', 'gicu-tabs', 'gicu-drop', 'gicu-photo', 'gicu-ta', 'gicu-retry', 'gicu-off', 'gicu-inline']
@@ -505,6 +505,7 @@ const restored = renderAndText(capture, {})
 check('三态恢复：门店下拉回到两家示例门店（状态可复现）', restored.text.includes('示例门店 A · 快餐档口') && findByClass(restored.tree, 'gicu-select').length === 1, restored.text.slice(0, 160))
 
 check('只收 jpg/png：png·jpg 通过，gif·无后缀拒绝', test.isAcceptedImage('a.png', 'image/png') === true && test.isAcceptedImage('a.jpg', 'image/jpeg') === true && test.isAcceptedImage('a.gif', 'image/gif') === false && test.isAcceptedImage('a', '') === false, '')
+
 check('采集面只收单张（MAX_PHOTOS = 1，与后端 MAX_PHOTOS_SUBMIT 对齐）', test.MAX_PHOTOS === 1, String(test.MAX_PHOTOS))
 check('单张上限 2MB（与后端 MAX_PHOTO_BYTES 对齐）', test.MAX_PHOTO_BYTES === 2 * 1024 * 1024, String(test.MAX_PHOTO_BYTES))
 check('一句话上限 200 字', test.NOTE_MAX === 200, String(test.NOTE_MAX))
@@ -527,6 +528,8 @@ check('载入示例后一句话被填入（仍须真实调用模型）', afterSa
 check('选中后是大图预览 + 删除按钮', findByClass(afterSample.tree, 'frame').length === 1 && Boolean(buttonByLabel(afterSample.tree, '删除')), '')
 const readySubmit = buttonByLabel(afterSample.tree, '提交并分析')
 check('照片与文字齐备后「提交并分析」可用', Boolean(readySubmit) && readySubmit.props.disabled === false, JSON.stringify(readySubmit && readySubmit.props.disabled))
+// 真机截图里的自相矛盾：材料齐、按钮亮蓝，状态行却还说「（照片与文字都填写后按钮可用）」。
+check('就绪态不再说「填写后按钮可用」（同一 data-kind=idle，换成就绪文案）', afterSample.text.includes(test.STATE_READY) && !afterSample.text.includes(test.STATE_EMPTY), afterSample.text.slice(0, 200))
 
 // 后端的示例图口不存在时 → 退回前端内置示例图（不硬依赖后端口）
 sampleAvailable = false
@@ -682,6 +685,125 @@ const off = test.normalizeOffline({ offline: { offline: true, source: 'capture' 
 check('normalizeOffline 读到离线与队列', off.known === true && off.offline === true && off.pending === 3, JSON.stringify(off))
 check('normalizeOffline 无数据时标为未知（不假装在线）', test.normalizeOffline(null).known === false, '')
 check('门店标签映射到画面级文案', test.storeLabelOf({ storeId: 'S-001', storeType: '快餐档口' }) === '示例门店 A · 快餐档口' && test.storeLabelOf({ storeId: 'S-002', storeType: '正餐堂食' }) === '示例门店 B · 正餐堂食', test.storeLabelOf({ storeId: 'S-001', storeType: '快餐档口' }))
+
+// ── 退回闭环 · 店长侧承接面（用户实测反馈："点完退回并说明，看不到退到哪去了"）────
+// 后端把退回写下来了，但店长端此前完全没有承接面 → 退回石沉大海。这一组盯住：
+//   ① 店长端有「待整改（被督导退回）」区（退回原因/时间/次数/整改回拍入口）；
+//   ② 点整改回拍 → 状态提示 + 提交体带 reworkOf（选择放在 store 里，跨重渲染存活）；
+//   ③ 已经有回拍单的原单从待整改里消失（不重复催）。
+// 放在文件末尾：这一组会真实调一次 submitSelfCheck（会写 submitState），不影响前面的断言。
+const RETURNED_SNAPSHOT = {
+  ok: true,
+  stores: SNAPSHOT.stores,
+  inspections: [
+    {
+      id: 'DEMO-20261003-010000-abcd-ISSUE',
+      storeId: 'S-001',
+      storeName: '示例门店·快餐档口甲',
+      status: 'pending_rectify',
+      returnedAt: '2026-10-03T01:00:00.000Z',
+      returnedCount: 2,
+      reworkOf: null,
+      dueAt: '2026-10-03T09:00:00.000Z',
+      // A-5 真机形状（#uzrn）：退回之后系统又自动催办过 → **lastAction 是系统的催办**，
+      // 店长端必须认「退回那一条」的原话与主体，不能拿 lastAction 当退回人/退回原因。
+      lastAction: { type: '催办', actionCode: 'review_remind', at: '2026-10-03T02:00:00.000Z', actor: '系统', actorIsHuman: false, reason: '截止时间已过（系统自动催办）' },
+      actions: [
+        { id: 'A1', type: '退回并说明', actionCode: 'review_reject', target: '后门堆货', createdAt: '2026-10-03T01:00:00.000Z', reason: '后门堆货未清，请清理后回拍', actor: '督导（演示视图）', actorName: '督导（演示视图）', actorIsHuman: true, result: '退回' },
+        { id: 'A2', type: '催办', actionCode: 'review_remind', target: '示例门店·快餐档口甲·整改截止已过', createdAt: '2026-10-03T02:00:00.000Z', reason: '截止时间已过（系统自动催办）', actor: '系统', actorName: null, actorIsHuman: false, result: '已催办' },
+      ],
+    },
+  ],
+  counts: {},
+  offline: { offline: false, source: 'capture' },
+  pendingQueue: { pending: 0, judged: 0, items: [] },
+}
+check('pendingReworkOf：只收"被退回过且还没有回拍单"的本店单', test.pendingReworkOf(RETURNED_SNAPSHOT, 'S-001').length === 1 && test.pendingReworkOf(RETURNED_SNAPSHOT, 'S-002').length === 0 && test.pendingReworkOf({ inspections: [{ id: 'A', storeId: 'S-001', returnedAt: 'x', reworkOf: null }, { id: 'B', storeId: 'S-001', reworkOf: 'A' }] }, 'S-001').length === 0, JSON.stringify(test.pendingReworkOf(RETURNED_SNAPSHOT, 'S-001')))
+// 真机实测漏过一条：督导把**原单**逐项点通过办结、又没有产生回拍单时（例：#flsq），
+// 已办结的单还挂在店长端「待整改」里，等于让店长去整改一条已经办结的单。
+check('已办结（rectified/closed/approved）的单不再进「待整改」',
+  test.pendingReworkOf({ inspections: [
+    { id: 'A', storeId: 'S-001', returnedAt: 'x', status: 'rectified', reworkOf: null },
+    { id: 'B', storeId: 'S-001', returnedAt: 'x', status: 'pending_rectify', reworkOf: null },
+    { id: 'C', storeId: 'S-001', returnedAt: 'x', status: 'overdue', reworkOf: null },
+  ] }, 'S-001').map((r) => r.id).join(',') === 'B,C',
+  JSON.stringify(test.pendingReworkOf({ inspections: [
+    { id: 'A', storeId: 'S-001', returnedAt: 'x', status: 'rectified', reworkOf: null },
+    { id: 'B', storeId: 'S-001', returnedAt: 'x', status: 'pending_rectify', reworkOf: null },
+    { id: 'C', storeId: 'S-001', returnedAt: 'x', status: 'overdue', reworkOf: null },
+  ] }, 'S-001').map((r) => r.id)))
+{
+  const row = test.pendingReworkOf(RETURNED_SNAPSHOT, 'S-001')[0]
+  check('A5 待整改项的退回原因取「退回那条」（不是系统催办原因）', row.reason === '后门堆货未清，请清理后回拍' && row.reason.indexOf('系统自动催办') === -1, JSON.stringify(row.reason))
+  check('A5 待整改项标明是人工退回（不再显示"由 系统"）', row.actor === '督导（演示视图）（人工退回）' && row.hasRejectRow === true, row.actor)
+  check('A5 退回时间取退回那条（01:00，不是催办的 02:00）', row.returnedAt === '2026-10-03T01:00:00.000Z', row.returnedAt)
+  // 客户 10-03 用完真机的裁定：「催办」不能是摆设 —— 督导端写了一条记录，门店端必须看得见。
+  // 数据同样不新增字段：同一张单的 actions 里已有催办记录（人工 type='催办' / 系统 actionCode='review_remind'）。
+  check('催办痕迹进门店端：次数 + 最近时刻 + 谁催的（系统自动要说清）', row.remindCount === 1 && row.remindAt === '2026-10-03T02:00:00.000Z' && row.remindBy === '系统自动', JSON.stringify({ count: row.remindCount, at: row.remindAt, by: row.remindBy }))
+}
+{
+  const human = test.pendingReworkOf({ inspections: [{
+    id: 'A', storeId: 'S-001', returnedAt: 'x', status: 'pending_rectify', reworkOf: null,
+    actions: [
+      { type: '催办', actionCode: 'review_remind', createdAt: '2026-10-03T03:00:00.000Z', actor: '督导（演示视图）', actorIsHuman: true },
+      { type: '催办', actionCode: 'review_remind', createdAt: '2026-10-03T04:00:00.000Z', actor: '督导（演示视图）', actorIsHuman: true },
+    ],
+  }] }, 'S-001')[0]
+  check('催办取总次数 + 最近一条；人工催办不写成「系统自动」', human.remindCount === 2 && human.remindAt === '2026-10-03T04:00:00.000Z' && human.remindBy === '督导（演示视图）', JSON.stringify(human))
+  const none = test.pendingReworkOf({ inspections: [{ id: 'A', storeId: 'S-001', returnedAt: 'x', status: 'pending_rectify', reworkOf: null, actions: [] }] }, 'S-001')[0]
+  check('没被催过的单不写催办行（count=0，界面不出现这一行）', none.remindCount === 0 && none.remindAt === null && none.remindBy === '', JSON.stringify(none))
+}
+
+test.snapshotSource.data = RETURNED_SNAPSHOT
+test.snapshotSource.failure = ''
+test.snapshotSource.notify()
+const reworkTree = renderAndText(capture, {})
+check('店长端出现「待整改（被督导退回）」+ 退回原因 + 整改回拍入口', reworkTree.text.includes('待整改（被督导退回）') && reworkTree.text.includes('后门堆货未清，请清理后回拍') && Boolean(buttonByLabel(reworkTree.tree, '整改后重新提交')), reworkTree.text.slice(0, 240))
+check('待整改项显示退回次数（共退回 2 次，重复退回也看得出来）', reworkTree.text.includes('共退回 2 次'), '')
+check('门店端「待整改」卡上真的显示催办痕迹（"催办是摆设"这条修掉）', reworkTree.text.includes('被催办 1 次') && reworkTree.text.includes('最近') && reworkTree.text.includes('系统自动'), reworkTree.text.slice(0, 420))
+
+buttonByLabel(reworkTree.tree, '整改后重新提交').props.onClick()
+// 点击后到断言之间**不能 await**：组件挂载会触发一次 pullSnapshot，异步回填会把夹具覆盖成默认快照。
+test.snapshotSource.data = RETURNED_SNAPSHOT
+test.snapshotSource.notify()
+const afterPickRework = renderAndText(capture, {})
+check('点整改回拍 → 提示「正在整改回拍 …」且按钮变「取消整改回拍」', afterPickRework.text.includes('正在整改回拍') && Boolean(buttonByLabel(afterPickRework.tree, '取消整改回拍')), afterPickRework.text.slice(0, 200))
+
+await test.submitSelfCheck({ storeId: 'S-001', note: '已清理后门堆货并回拍', photos: [{ name: 'rework.png', size: 1234, mediaType: 'image/png', dataUrl: 'data:image/png;base64,QUJD' }], reworkOf: 'DEMO-20261003-010000-abcd-ISSUE' })
+const reworkSubmitReq = requests.filter((r) => r.path.indexOf('/submit') !== -1 && r.path.indexOf('report') === -1).slice(-1)[0]
+check('整改回拍提交体带 reworkOf（后端据此把新单标成"整改回拍自 原单"）', Boolean(reworkSubmitReq && reworkSubmitReq.body && reworkSubmitReq.body.reworkOf === 'DEMO-20261003-010000-abcd-ISSUE'), JSON.stringify(reworkSubmitReq && reworkSubmitReq.body))
+check('提交被受理后「正在整改回拍」标记自动清掉（这次回拍用掉了）', test.reworkState.snapshot.id === '', JSON.stringify(test.reworkState.snapshot))
+
+test.snapshotSource.data = { ...RETURNED_SNAPSHOT, inspections: [...RETURNED_SNAPSHOT.inspections, { id: 'INS-REWORK-1', storeId: 'S-001', status: 'pending_rectify', reworkOf: 'DEMO-20261003-010000-abcd-ISSUE' }] }
+test.snapshotSource.notify()
+const afterReworkSnap = renderAndText(capture, {})
+// 已经有回拍单的原单从「待整改」里消失（不会重复催）
+check('已经有回拍单的原单从「待整改」里消失（不会重复催）', afterReworkSnap.text.indexOf('待整改（被督导退回）') === -1, afterReworkSnap.text.slice(0, 160))
+
+// A-1.6：整改回拍**不受本地 60s 重复提交锁**限制（刚提交完就点「整改后重新提交」必须能交上去；
+// 真机验收时就是被这条锁按住，按钮 disabled、提示"同一门店不允许重复提交"，与用户意图相反）。
+{
+  test.submitState.lastStoreId = 'S-001'
+  test.submitState.lastSubmittedAt = Date.now()
+  test.submitState.notify()
+  const locked = test.busyReasonOf({ ok: true, inspections: [] }, 'S-001', Date.now(), false)
+  const reworkFree = test.busyReasonOf({ ok: true, inspections: [] }, 'S-001', Date.now(), true)
+  check('A-1.6 普通重复提交仍被 60s 锁拦住（防手抖）', locked.indexOf('刚提交过') !== -1, locked)
+  check('A-1.6 整改回拍豁免该锁（回拍是督导要求做的下一步）', reworkFree === '', JSON.stringify(reworkFree))
+  const analyzing = test.busyReasonOf({ ok: true, inspections: [{ id: 'X', storeId: 'S-001', status: 'analyzing' }] }, 'S-001', Date.now(), true)
+  check('A-1.6 但"该店有正在分析/排队的单"仍拦（并发保护不受豁免影响）', analyzing.indexOf('正在分析') !== -1, analyzing)
+}
+
+// 收尾：把这组用到的 store 复位，便于以后在文件后面继续追加断言
+test.reworkState.setId('')
+test.submitState.phase = 'idle'
+test.submitState.receipt = null
+test.submitState.lastStoreId = ''
+test.submitState.lastSubmittedAt = 0
+test.submitState.notify()
+test.snapshotSource.data = savedSnapshotData
+test.snapshotSource.failure = ''
+test.snapshotSource.notify()
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────
 console.log('')

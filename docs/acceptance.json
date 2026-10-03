@@ -1,0 +1,292 @@
+{
+  "schema": "gaia-acceptance@1",
+  "orderWord": "门店督导",
+  "standard": "agent-acceptance",
+  "standardVersion": "28 项：L1 11 / L2 5 / L3 7 / L4 5",
+  "kernel": "0.2.0-rc.1",
+  "generatedAt": "2026-10-03T09:31:25.578Z",
+  "authorizedL4": false,
+  "summary": {
+    "L1": {
+      "pass": 9,
+      "fail": 1,
+      "warn": 0,
+      "na": 1,
+      "notRun": 0,
+      "cannotRun": 0,
+      "error": 0
+    },
+    "L2": {
+      "pass": 4,
+      "fail": 0,
+      "warn": 0,
+      "na": 0,
+      "notRun": 0,
+      "cannotRun": 1,
+      "error": 0
+    },
+    "L3": {
+      "pass": 7,
+      "fail": 0,
+      "warn": 0,
+      "na": 0,
+      "notRun": 0,
+      "cannotRun": 0,
+      "error": 0
+    },
+    "L4": {
+      "pass": 0,
+      "fail": 0,
+      "warn": 0,
+      "na": 0,
+      "notRun": 5,
+      "cannotRun": 0,
+      "error": 0
+    }
+  },
+  "items": [
+    {
+      "id": "L1-01",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "包根一级 *.exe = 1（门店督导.exe）；根下一级文件 17 个",
+      "threshold": "恰好 1 个 *.exe",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导"
+    },
+    {
+      "id": "L1-02",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "app.asar=true / app\\=false / runtime\\node.exe=true / 内核入口=dsh\\lib\\bin.js（0.2.0 散文件形态）；内核版本 0.2.0-rc.1",
+      "threshold": "app.asar 或 app\\ + runtime\\node.exe + 内核入口 3/3",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources"
+    },
+    {
+      "id": "L1-03",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "插件库=true、skill库=true",
+      "threshold": "两处都存在",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia"
+    },
+    {
+      "id": "L1-04",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "素材库包 8 个 → 成品同名目录+package.json 8/8；声明 dsh.bundle.patch 的补丁缺失 0",
+      "threshold": "n/n 且补丁文件存在",
+      "evidence": "D:\\盖亚\\build\\products\\素材库\\插件素材库\\门店督导 → D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\插件库"
+    },
+    {
+      "id": "L1-05",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "产品skill库 4 个 → 成品 SKILL.md 4/4",
+      "threshold": "n/n",
+      "evidence": "D:\\盖亚\\build\\products\\产品skill库\\门店督导 → D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\skill库"
+    },
+    {
+      "id": "L1-06",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "能力词 16 条 → 命中 16/16（命中来源：插件 manifest.json/package.json keywords、技能 description/目录名）",
+      "threshold": "n/n 命中",
+      "evidence": "D:\\盖亚\\build\\products\\日志库\\门店督导\\state.json"
+    },
+    {
+      "id": "L1-07",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "日志里报出的路径 8 条：交付路径 3 条 → 存在 3/3；上下文路径（DSH_HOME/构建区/种子库，不是交付路径）5 条；美化器=no-op（美术层无需求，合法结果）",
+      "threshold": "交付路径逐个存在（n/n）",
+      "evidence": "D:\\盖亚\\build\\products\\日志库\\门店督导\\安装器.log"
+    },
+    {
+      "id": "L1-08",
+      "blocking": true,
+      "verdict": "fail",
+      "actual": "命中 2 处：data\\home\\.credentials.yaml:secret , data\\home\\.credentials.yaml:DEEPSEEK_API_KEY（仅位置，不抄原文）",
+      "threshold": "命中 0",
+      "evidence": "data\\home\\.credentials.yaml"
+    },
+    {
+      "id": "L1-09",
+      "blocking": false,
+      "verdict": "na",
+      "actual": "订单未给体积上限（state.json 里没有上限字段）→ 按标准记不适用；实测成品体积 1.14 GB",
+      "threshold": "本项不适用",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导"
+    },
+    {
+      "id": "L1-10",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "扫 1 个运行期可写区子树，指向成品之外的链接 0 个（pnpm 指向本包 .pnpm 的属正常）",
+      "threshold": "指向成品之外的链接 = 0",
+      "evidence": "data\\home"
+    },
+    {
+      "id": "L1-11",
+      "blocking": false,
+      "verdict": "pass",
+      "actual": "成品技能 4 个 vs 内核自带技能 8 个 → 重名 0",
+      "threshold": "重名 0",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\runtime\\dsh\\node_modules\\@deepseek-ai\\dsh-agent-preset\\skills / D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\runtime\\office-skills"
+    },
+    {
+      "id": "L2-01",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "技能 4 个：references/scripts/assets 悬空 0；正文点名的工具名 10 个 → 成品里解析不到 0",
+      "threshold": "悬空 0 且工具名 100% 命中",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\skill库"
+    },
+    {
+      "id": "L2-02",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "插件 8 个：main/exports 指向的文件 32 条 → 缺失 0",
+      "threshold": "100% 存在",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\插件库"
+    },
+    {
+      "id": "L2-03",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "cordis.patch.yml 8 个 / insert 条目 0 条 → 问题 0",
+      "threshold": "YAML 可解析 + id 唯一 + name 可解析（100%）",
+      "evidence": "resources\\gaia\\插件库\\gaia-inspection-action\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-capture\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-capture-ui\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-core\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-demo\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-oversight-ui\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-preset\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-registry\\cordis.patch.yml"
+    },
+    {
+      "id": "L2-04",
+      "blocking": false,
+      "verdict": "cannotRun",
+      "actual": "扫描 3 个 persona/预设文件，提取不到\"加载…技能：<名字>\"句式 → 无可用手段，按标准记无法执行（不猜）",
+      "threshold": "无法执行",
+      "evidence": "resources\\gaia\\插件库\\gaia-inspection-preset\\cordis.patch.yml , resources\\gaia\\插件库\\gaia-inspection-preset\\package.json , resources\\gaia\\插件库\\gaia-inspection-preset\\README.md"
+    },
+    {
+      "id": "L2-05",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "八包依赖解析（根：profiles/desktop/node_modules、runtime/dsh/node_modules）：gaia-inspection-action:0  gaia-inspection-capture:0  gaia-inspection-capture-ui:0  gaia-inspection-core:0  gaia-inspection-demo:0  gaia-inspection-oversight-ui:0  gaia-inspection-preset:0  gaia-inspection-registry:0",
+      "threshold": "全部可解析（零依赖记不适用）",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\data\\home\\profiles\\desktop\\node_modules / D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\runtime\\dsh\\node_modules"
+    },
+    {
+      "id": "L3-01",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "技能 4 个 → 10 条内核口径全过 4/4",
+      "threshold": "n/n 真解析（无 BOM / 首行 --- / 闭合 / YAML 对象 / name+description 非空 / name 正则 / whenToUse / 两布尔 / 无旧键 / metadata 对象）",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\skill库"
+    },
+    {
+      "id": "L3-02",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "技能 4 个：name 与目录名逐字一致",
+      "threshold": "n/n 一致",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\skill库"
+    },
+    {
+      "id": "L3-03",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "出厂预设目录 dsh-web-app\\presets 存在=false（残留 0 个）；落 presets 目录的包 0 个；声明 dsh.preset 的包：无（其中非本单交付的 0 个）；交付侧挂载行命中越权行 0",
+      "threshold": "出厂预设残留 0 + 无非本单预设型包 + 交付预设无越权挂载行",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\runtime\\dsh\\node_modules\\@deepseek-ai\\dsh-web-app\\presets"
+    },
+    {
+      "id": "L3-04",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "声明 dsh.client 的包 2 个 → 契约问题 0；seat/槽名 2 个 → 官方客户端里找不到 0",
+      "threshold": "platform=web + ./client 存在 + seat 名真实存在（100%）",
+      "evidence": "gaia-inspection-capture-ui , gaia-inspection-oversight-ui"
+    },
+    {
+      "id": "L3-05",
+      "blocking": false,
+      "verdict": "pass",
+      "actual": "技能 4 个：description ≤1024、compatibility ≤500、顶层键在允许表内",
+      "threshold": "0 越界",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\skill库"
+    },
+    {
+      "id": "L3-06",
+      "blocking": false,
+      "verdict": "pass",
+      "actual": "插件 8 个：version 都是具体值",
+      "threshold": "无 range/latest",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\插件库"
+    },
+    {
+      "id": "L3-07",
+      "blocking": true,
+      "verdict": "pass",
+      "actual": "插件 8 个：工具名 19 个 → 非法/对不上 0",
+      "threshold": "逐条 ^[a-zA-Z0-9_-]+$ + 与 manifest 一致",
+      "evidence": "D:\\盖亚\\build\\products\\成品区\\门店督导\\resources\\gaia\\插件库"
+    },
+    {
+      "id": "L4-01",
+      "blocking": false,
+      "verdict": "notRun",
+      "actual": "运行时工具面：未获操作者授权（标准要求授权 + 额度上限才跑）：本轮不跑；静态可解析性由 L2-03 覆盖",
+      "threshold": "本次未执行",
+      "evidence": "需授权"
+    },
+    {
+      "id": "L4-02",
+      "blocking": false,
+      "verdict": "notRun",
+      "actual": "技能运行时可见性：未获操作者授权（标准要求授权 + 额度上限才跑）：本轮不跑；播种源静态核对由 L1-05 覆盖",
+      "threshold": "本次未执行",
+      "evidence": "需授权"
+    },
+    {
+      "id": "L4-03",
+      "blocking": false,
+      "verdict": "notRun",
+      "actual": "起一次成品（会弹窗、写临时实例目录）：未获操作者授权（标准要求授权 + 额度上限才跑）：本轮不跑",
+      "threshold": "本次未执行",
+      "evidence": "需授权"
+    },
+    {
+      "id": "L4-04",
+      "blocking": false,
+      "verdict": "notRun",
+      "actual": "行为面 pass^k + 装/不装对照：未获操作者授权（标准要求授权 + 额度上限才跑）：本轮不跑",
+      "threshold": "本次未执行",
+      "evidence": "需授权"
+    },
+    {
+      "id": "L4-05",
+      "blocking": false,
+      "verdict": "notRun",
+      "actual": "persona 软约束探针：未获操作者授权（标准要求授权 + 额度上限才跑）：本轮不跑",
+      "threshold": "本次未执行",
+      "evidence": "需授权"
+    }
+  ],
+  "blocking": [
+    {
+      "id": "L1-08",
+      "verdict": "fail",
+      "actual": "命中 2 处：data\\home\\.credentials.yaml:secret , data\\home\\.credentials.yaml:DEEPSEEK_API_KEY（仅位置，不抄原文）",
+      "threshold": "命中 0"
+    }
+  ],
+  "overrides": [],
+  "notRun": [
+    "L2-04",
+    "L4-01",
+    "L4-02",
+    "L4-03",
+    "L4-04",
+    "L4-05"
+  ],
+  "verdict": "blocked",
+  "report": "D:\\盖亚\\build\\products\\日志库\\门店督导\\收尾报告.md"
+}

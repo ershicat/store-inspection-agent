@@ -156,7 +156,7 @@ export function loadStandards(format) {
 }
 
 /** 提示词版本：改 CHECKLIST_SYSTEM / 提示词结构时必须同步涨版本（README 有说明）。 */
-export const CHECKLIST_PROMPT_VERSION = 'checklist-v4'
+export const CHECKLIST_PROMPT_VERSION = 'checklist-v5'
 
 export const CHECKLIST_SYSTEM = [
   '你是餐饮门店巡店督导的检查项生成器。',
@@ -168,6 +168,7 @@ export const CHECKLIST_SYSTEM = [
   '4) 只输出 JSON，不要输出解释、不要用 markdown 代码块。',
   '5) 若本次输入不足以判断，要在 reasons 里如实说明"信息不足"，不要编造线索；**有没有照片、门店与业态是否给出，都必须按实际收到的情况说**。',
   '6) 若给了「检查标准」（可能是全公司通用，也可能标注为**本次业态专项**）：**以它为主要参考**（总部/客户就是按它考核的），但**不是逐条勾选**——标准里与本次输入无关的项可以不列；标准里没写、而本次照片或说明里确实出现的问题，**也要提出**，并在 why 里说明理由。标准只是参考维度，不是本次检查项的固定清单。',
+  '7) 若给了「本单必须逐项复核的原单退回项」（整改回拍复核）：这些项**必须一项不漏地出现在 items 里**（名称可以按场景略作措辞，但要能一一对上），why 里写明"原单退回项，本次回拍复核"；在此之外仍可按本次照片/说明补充新项。',
   '输出 JSON 形状：',
   '{"items":[{"itemId":"简短英文或拼音标识","name":"中文检查项名","why":"为什么这次查它","weight":3}],"reasons":"本次为什么查这几项的一段话"}',
 ].join('\n')
@@ -194,6 +195,10 @@ export async function generateChecklist(deps, args) {
   const note = String(args.note || '').trim() || '（店长未附一句话说明）'
   const photoHints = Array.isArray(args.photoHints) ? args.photoHints.filter(Boolean).map(String) : []
   const photos = Array.isArray(args.photos) ? args.photos.filter((p) => p && p.bytes && p.bytes.length > 0) : []
+  // 「整改回拍复核」的必查项（A-6 口径）：原单里还没通过的那几项。
+  // 口径定死：**原单退回项必须逐项列入本次检查项（逐项对账），同时允许模型按本次照片补充新项**；
+  // 模型万一漏了，下面会**硬补**进去（不只是提示词求它），否则"整改通过"没法逐项对账，闭环断在最后一米。
+  const mustItems = Array.isArray(args.mustItems) ? args.mustItems.map((t) => String(t || '').trim()).filter(Boolean) : []
   // 本次使用的检查标准：客户/总部注入的那份 → 随包交付的 → 内置兜底（读不到也绝不抛）。
   // 传 storeType，让"分业态标准"（byFormat）能被命中；没有 byFormat 就是全公司统一一份。
   const standards = loadStandards(storeType)
@@ -234,6 +239,10 @@ export async function generateChecklist(deps, args) {
       ? `本次共 ${refs.length} 张门店照片，**已随本消息附上（按顺序 photoIndex 从 0 开始：${photos.map((p, i) => `${i}=${String(p.name || `photo-${i}`)}`).join('，')}）。必须直接看图**，把画面里真实看得到的东西当作本次检查项的线索。`
       : '本次没有照片，只能依据店长说明与门店业态判断（请在 reasons 里如实说明"无照片"）。',
     photoHints.length > 0 ? `本次照片的机器可见线索（由采集侧原样给出，未做判断）：\n${photoHints.map((t, i) => `${i + 1}. ${t}`).join('\n')}` : '',
+    // 整改回拍复核：把原单「还没通过」的判断项列出来，要求逐项列入（漏了会被硬补，见下方 mustItems 合并）
+    mustItems.length > 0
+      ? `**本单是整改回拍复核**：以下 ${mustItems.length} 项是原单被退回 / 还没通过、本次必须逐项复核的项，**请一项不漏地列入 items**（名称可按本次场景措辞，但要能一一对上，why 写明"原单退回项，本次回拍复核"）：\n${mustItems.map((t) => `- ${t}`).join('\n')}\n在此之外，仍要按本次照片与说明补充**新发现**的检查项。`
+      : '',
     // 检查标准：客户/总部注入的那份（可能是全公司统一、也可能是本业态专项）。标准是**参考维度**，不是本次清单。
     standards.source === 'builtin'
       ? `可参考的判定维度（本单尚未注入客户检查标准，先用内置参考维度；可增删，不必全用）：\n${standards.dimensions.map((t) => `- ${t}`).join('\n')}`
@@ -247,7 +256,7 @@ export async function generateChecklist(deps, args) {
   const call = await loggedCall(logger, route, {
     kind: 'checklist_generate',
     promptVersion: CHECKLIST_PROMPT_VERSION,
-    requestSummary: `门店 ${storeName}（${storeType}）；照片 ${photos.length} 张；店长说明 ${note.length} 字；照片线索 ${photoHints.length} 条；参考维度 ${standards.dimensions.length} 条；检查标准 ${standards.version}${standards.scope === 'format' ? `（按业态专项·${standards.format}）` : standards.source === 'builtin' ? '（未注入）' : `（${standards.source === 'injected' ? '客户注入' : '随包交付'}）`}`,
+    requestSummary: `门店 ${storeName}（${storeType}）；照片 ${photos.length} 张；店长说明 ${note.length} 字；照片线索 ${photoHints.length} 条；参考维度 ${standards.dimensions.length} 条；检查标准 ${standards.version}${standards.scope === 'format' ? `（按业态专项·${standards.format}）` : standards.source === 'builtin' ? '（未注入）' : `（${standards.source === 'injected' ? '客户注入' : '随包交付'}）`}${mustItems.length > 0 ? `；**整改回拍复核项 ${mustItems.length} 条**` : ''}`,
     storeId: args.storeId ?? null,
     inspectionId: args.inspectionId ?? null,
   }, {
@@ -277,6 +286,34 @@ export async function generateChecklist(deps, args) {
   if (items.length === 0) {
     return { ok: false, callId: call.callId, error: { code: 'MODEL_OUTPUT_EMPTY', message: `检查项生成失败：模型输出里没有可用的检查项（原始输出前 200 字：${String(call.text || '').slice(0, 200)}）。` } }
   }
+  // 硬保证：回拍复核项一项不漏（模型漏了就补进去，并在 why 里写明来源）。
+  // 名字比对放宽：去标点/空白 + 严格包含 + **字符重合度 ≥ 0.6** ——
+  // 避免"后门堆货清运结果现场复核"与"后门堆货清运复核"（中间插了几个字）这种写法被判成漏项、白补一遍。
+  const nameKey = (s) => String(s || '').replace(/[\s·，。、（）()【】\[\]—\-_/／:：;；]/g, '').toLowerCase()
+  const charOverlap = (a, b) => {
+    const A = new Set(String(a).split(''))
+    const B = new Set(String(b).split(''))
+    if (A.size === 0 || B.size === 0) return 0
+    let hit = 0
+    for (const ch of A) if (B.has(ch)) hit += 1
+    return hit / Math.min(A.size, B.size)
+  }
+  const covered = (name) => {
+    const k = nameKey(name)
+    if (!k) return true
+    return items.some((it) => {
+      const ik = nameKey(it.name)
+      return Boolean(ik) && (ik === k || ik.indexOf(k) !== -1 || k.indexOf(ik) !== -1 || charOverlap(ik, k) >= 0.6)
+    })
+  }
+  const appended = []
+  for (const must of mustItems) {
+    if (covered(must)) continue
+    let itemId = `rework-${appended.length + 1}`
+    while (items.some((it) => it.itemId === itemId)) itemId += 'x'
+    items.push({ itemId, name: must, why: '原单退回项（整改回拍必须逐项复核）；模型本次未列入，由后端按口径补齐', weight: 5, source: 'rework-must-item' })
+    appended.push(must)
+  }
   return {
     ok: true,
     callId: call.callId,
@@ -287,6 +324,8 @@ export async function generateChecklist(deps, args) {
       items,
       reasons: String(parsed.reasons ?? '').trim(),
       dimensionHints: standards.dimensions,
+      // A-6 审计口径：本次要求逐项复核几项、模型自己列了几项、后端硬补了几项
+      mustItems: { required: mustItems, appended, coveredCount: mustItems.length - appended.length },
       // 本次参考的是哪套标准、从哪儿读的（答辩/排查都用得上：客户改完文件，这里立刻变）
       standards: { source: standards.source, seat: standards.seat, path: standards.path, version: standards.version, count: standards.dimensions.length, scope: standards.scope, format: standards.format, matchedBy: standards.matchedBy, error: standards.error },
     },

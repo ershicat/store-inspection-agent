@@ -352,7 +352,27 @@ export async function apply(ctx, config = {}) {
    * 门店是 S-001/快餐档口、也知道照片里有瓶子 —— 两次调用自相矛盾，核心差异化点做掉了一半。
    * 现在：门店档案先解析（与 judgeInternal 用同一份口径），照片按字节原样交给 core 作为图像输入。
    */
-  async function decideChecklist({ storeId, storeName, storeType, note, photos, timeoutMs, inspectionId }) {
+  /**
+   * 「整改回拍」的必查项（A-6 口径）＝ 原单里**还没通过**的判断项的名字。
+   *
+   * 口径（教练提出"这条口径没定"，现定死）：**原单退回项必须逐项列入回拍单的检查项（逐项对账），
+   * 同时允许模型按本次照片补充新项**；模型漏列时由 core 按同一口径硬补（见 checklist.js）。
+   * 取"还没通过"而不是"曾被退回"：退回后督导可能已经把其中几项点通过了，那几项不该再要求复核。
+   */
+  function reworkMustItems(originalId) {
+    const d = db()
+    if (!d || !originalId) return []
+    try {
+      return d
+        .where('findings', (f) => f.inspectionId === originalId && String(f.status || '') !== 'rectified')
+        .map((f) => String(f.itemName || '').trim())
+        .filter(Boolean)
+    } catch {
+      return []
+    }
+  }
+
+  async function decideChecklist({ storeId, storeName, storeType, note, photos, timeoutMs, inspectionId, mustItems }) {
     const cs = checklistSlot()
     if (!cs) return { items: [], reasons: '', callId: null, storeInfo: null, error: { code: 'DEPENDENCY_MISSING', message: 'ns.checklist 未就绪（gaia-inspection-core 未加载）：本次没有动态检查项' } }
     const reg = registrySlot()
@@ -369,8 +389,9 @@ export async function apply(ctx, config = {}) {
       photos,
       inspectionId,
       timeoutMs,
+      mustItems: Array.isArray(mustItems) ? mustItems : [],
     })
-    if (r && r.ok) return { items: r.data.items, reasons: r.data.reasons, callId: r.callId, storeInfo, error: null }
+    if (r && r.ok) return { items: r.data.items, reasons: r.data.reasons, callId: r.callId, storeInfo, error: null, mustItems: (r.data && r.data.mustItems) || null }
     return { items: [], reasons: '', callId: null, storeInfo, error: (r && r.error) || { code: 'CHECKLIST_UNKNOWN', message: '检查项生成未返回结果' } }
   }
 
@@ -380,6 +401,24 @@ export async function apply(ctx, config = {}) {
     if (!db()) return receipt({ ok: false, status: 'failed', summary: '巡店业务库未就绪', error: { code: 'DEPENDENCY_MISSING', message: '需要 ns.db，请确认 gaia-inspection-core 已加载' } })
     const input = collectPhotoInputs(b, MAX_PHOTOS_SUBMIT)
     if (!input.ok) return receipt({ ok: false, status: 'failed', summary: input.error.message, error: input.error })
+
+    // A-4 边界：门店不在档案里 → **结构化错误**（先校验再调模型）。
+    // 改前这里会静默降级成「门店 未指定门店」照样判读 —— 既把"不存在门店"这种输入错误糊过去，
+    // 又白烧两次模型调用。现在明确报 STORE_NOT_FOUND，让界面/agent 拿到可诊断的错。
+    if (b.storeId) {
+      const reg = registrySlot()
+      if (reg) {
+        const r = reg.getStore(String(b.storeId))
+        if (!r || !r.data) {
+          return receipt({
+            ok: false,
+            status: 'failed',
+            summary: `没有这家门店：${b.storeId}`,
+            error: { code: 'STORE_NOT_FOUND', message: `门店档案里没有 ${b.storeId}（本单只有 S-001 / S-002），请从门店列表里选一家再提交；本次未调用模型。` },
+          })
+        }
+      }
+    }
 
     const offline = state.manualOffline === true || state.routeDown === true
     // runId 在**检查项生成之前**就定下来：这样两次模型调用（checklist_generate / vision_judge）
@@ -401,7 +440,9 @@ export async function apply(ctx, config = {}) {
     })()
 
     // 检查项动态生成（真模型调用；离线时不调用，队列里带上原始输入，联网后一起补）
-    let checklist = { items: [], reasons: '', callId: null }
+    // 整改回拍：把原单"还没通过"的判断项作为必查项交给检查项生成（A-6 口径：退回项逐项对账 + 允许补充新项）
+    const mustItems = reworkOf ? reworkMustItems(reworkOf) : []
+    let checklist = { items: [], reasons: '', callId: null, mustItems: null }
     if (!offline) {
       try {
         const decided = await decideChecklist({
@@ -412,9 +453,11 @@ export async function apply(ctx, config = {}) {
           photos: input.photos,
           inspectionId: runId,
           timeoutMs: b.timeoutMs,
+          mustItems,
         })
-        checklist = { items: decided.items, reasons: decided.reasons, callId: decided.callId }
+        checklist = { items: decided.items, reasons: decided.reasons, callId: decided.callId, mustItems: decided.mustItems }
         if (decided.error) logger.warn(`检查项生成未成功（${decided.error.code}）：${decided.error.message}；本次按"无检查项"继续判读`)
+        else if (mustItems.length > 0) logger.warn(`整改回拍：本次要求逐项复核原单未通过项 ${mustItems.length} 条，检查项共 ${decided.items.length} 条（后端补齐 ${((decided.mustItems && decided.mustItems.appended) || []).length} 条）`)
       } catch (error) {
         logger.warn(`检查项生成异常（继续按"无检查项"判读）：${String((error && error.message) || error)}`)
       }
@@ -458,6 +501,9 @@ export async function apply(ctx, config = {}) {
           storeName: b.storeName ?? null,
           storeType: b.storeType ?? null,
           photoIds: result.saved.map((s) => s.photoId),
+          // 整改回拍来源**必须一起排队**：否则模型不可达时这次回拍会丢掉来源，
+          // 补判出来的新单在督导端就没有「整改回拍自 #原单」标记，退回闭环又断了。
+          reworkOf,
           reason: code,
           lastError: result.error.message,
         })
@@ -553,6 +599,8 @@ export async function apply(ctx, config = {}) {
         photos: inputs,
         inspectionId: runId,
         timeoutMs: row.timeoutMs,
+        // 补判同样按 A-6 口径带上原单未通过项（在线/离线两条路必须同口径）
+        mustItems: row.reworkOf ? reworkMustItems(row.reworkOf) : [],
       })
       checklistItems = decided.items
       checklistReasons = decided.reasons

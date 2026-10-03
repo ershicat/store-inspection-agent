@@ -1,0 +1,92 @@
+{
+  "orderWord": "门店督导",
+  "_note": "格式按 agent-acceptance\\references\\能力面.md 第一节（orderWord + cases[id/prompt/expected/files]）；下附 results 为收尾器追加的实测记录（能力面.md 的 pass^k 与装/不装对照记录格式），便于复跑对账。",
+  "cases": [
+    {
+      "id": 1,
+      "prompt": "调用 inspection_generate_checklist，参数 storeId=S-001、note=台面有污渍、地面有散落杂物，把返回的检查项与理由原样贴出来。",
+      "expected": "工具返回 ok:true，含 3–6 条检查项，每条带 why（理由，引用本次输入线索）与 weight；不得出现「returned invalid output」；调用后 inspection_model_calls 计数增长（真模型调用留痕）。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "调用 inspection_get_store，storeId 传 不存在的门店X，如实报告工具返回内容。",
+      "expected": "返回结构化空态 {ok:false, summary:\"没有这家门店：不存在的门店X\", data:null, error:{code:\"STORE_NOT_FOUND\"}}；不抛异常、不杜撰门店、不兜底编造。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我是店长，刚接班拍了一张后厨操作台的照片，想让你看看这次该查哪几项。",
+      "expected": "口语化 + 边界（输入里其实没有照片）：必须明确说明未收到照片（或指出可走采集入口/需要门店与照片），不得假装看见照片、不得杜撰检查项；若调用工具，工具调用必须成功（无 invalid output）。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "（装/不装对照的「不装」侧）同用例 1 的 prompt，在未装本单插件与技能的会话里执行。",
+      "expected": "会话如实报告 inspection_generate_checklist 不在可用工具列表中，且不杜撰检查项（预期失败，用于计算 lift）。",
+      "files": []
+    }
+  ],
+  "results": {
+    "probeComposition": {
+      "为什么用探针": "交付物自身的界面是浏览器 web 面，本会话无法启动 GUI/浏览器；且含 web-app 组合的 CLI 会被 web app 的 0 参数解析挡住（实测报 too many arguments）。故行为证据在 harness 临时隔离 home 内、以成品内核 + 成品插件/技能（file: 只读指向成品）的 CLI 组合取得。",
+      "装（条件 A）": "profile hl4 = @deepseek-ai/dsh-base + @deepseek-ai/dsh-headless + 成品 8 个 gaia 包（含客户预设 gaia-inspection-preset）+ 4 个成品技能播种到 <DSH_HOME>\\skills；另以 --patch 补一层 agent-preset-registry 行（id=inspection），仅为让交付预设激活——该行在交付物里由 web-app 组合包提供。",
+      "不装（条件 B）": "独立 home：profile hlc = @deepseek-ai/dsh-base + @deepseek-ai/dsh-headless，无 gaia 包、无 skills 目录。",
+      "成品是否被改动": "无。探针只读引用成品文件；成品实测 15078 文件 / 833,392,922 B 未变；data-accept 未生成、profile deps 仍为 {}；临时隔离 home 跑完已删除。"
+    },
+    "perCase": [
+      { "id": 1, "k": 2, "successA": 2, "successB": 0, "passK": true, "lift": 1.0,
+        "runsA": [
+          { "run": 1, "结论": "成功", "摘要": "ok:true，6 项检查项 + 理由；模型 deepseek-official/deepseek-flash", "证据": "data\\temp\\r3-B2-run1.out.txt" },
+          { "run": 2, "结论": "成功", "摘要": "ok:true，6 项（countertop_clean / floor_debris …）+ 理由；deepseek-official/deepseek-flash 4832ms callId=MC-mur1gfli-0001-u64x", "证据": "data\\temp\\r3-B2-run2.out.txt" }
+        ],
+        "runsB": [
+          { "run": 1, "结论": "失败（预期）", "摘要": "会话如实报告该工具不在可用工具列表中，并列出现实工具面（无任何 inspection_*）", "证据": "data\\temp\\r3-ctl-B-run1.out.txt" },
+          { "run": 2, "结论": "失败（预期）", "摘要": "同上，且检索工作目录无任何 inspection 相关文件，未杜撰检查项", "证据": "data\\temp\\r3-ctl-B-run2.out.txt" }
+        ],
+        "invalidOutputCount": 0 },
+      { "id": 2, "k": 2, "successA": 2, "successB": null, "passK": true, "lift": null,
+        "runsA": [
+          { "run": 1, "结论": "成功", "摘要": "返回 {ok:false, summary:\"没有这家门店：不存在的门店X\", data:null, error:{code:STORE_NOT_FOUND}}", "证据": "data\\temp\\r3-C-run1.out.txt" },
+          { "run": 2, "结论": "成功", "摘要": "同上（结构化空态原样贴出）", "证据": "data\\temp\\r3-C-run2.out.txt" }
+        ],
+        "runsB": [],
+        "invalidOutputCount": 0 },
+      { "id": 3, "k": 2, "successA": 2, "successB": null, "passK": true, "lift": null,
+        "runsA": [
+          { "run": 1, "结论": "成功", "摘要": "明确说“没有收到那张照片”，拒绝编线索，要求补照片/本地路径，并给出两家示例门店供确认", "证据": "data\\temp\\r3-D2-run1.out.txt" },
+          { "run": 2, "结论": "成功", "摘要": "同上，并说明现有 3 张均为演示合成样例图（非真实门店照片）", "证据": "data\\temp\\r3-D2-run2.out.txt" }
+        ],
+        "runsB": [],
+        "invalidOutputCount": 0 },
+      { "id": 4, "k": 2, "successA": 0, "successB": 0, "passK": null, "lift": 0,
+        "说明": "对照侧用例（不装）本身预期失败，仅用于 lift；lift 针对用例 1 计算为 100% − 0% = +100%",
+        "runsA": [],
+        "runsB": [], "invalidOutputCount": 0 }
+    ],
+    "L4-01 工具面探针": {
+      "做法": "真起会话，逐个真调 9 个成功路径工具并把返回原文贴出",
+      "工具与结果": "inspection_load_samples / inspection_list_stores / inspection_get_store(S-001) / inspection_counts / inspection_query(stores) / inspection_model_calls / inspection_scan_status / inspection_offline_mode(offline=true) / inspection_pending_queue(list) → 9/9 返回 ok:true（无一条 invalid output）",
+      "证据": "data\\temp\\r3-p1.txt、r3-p1.err.txt"
+    },
+    "L4-02 技能可见性": {
+      "会话内技能目录": "inspection-checklist-dynamic / inspection-delivery-docs / inspection-demo-reset / inspection-scope-discipline（4/4）",
+      "真实加载验证": "skill 工具加载 inspection-checklist-dynamic → 回显正文首行「# 检查项动态生成（inspection-checklist-dynamic）」",
+      "证据": "data\\temp\\r3-F2-技能清单.out.txt、r3-G2-加载技能.out.txt"
+    },
+    "L4-03 启动冒烟": {
+      "做法": "成品内核 + 成品 profile（accept，已按 seedPlugins 口径登记 8 包）的隔离副本 + 独立临时实例目录",
+      "结果": "127.0.0.1:3095 有监听；认证 URL → HTTP 200 / 34350 B / <title>DeepSeek Harness</title>；dsh --version = 0.2.0-rc.1；无 skipping profile bundle",
+      "证据": "data\\temp\\r3-web2-out.txt、r3-web2-err.txt"
+    },
+    "L4-05 persona 软约束探针": {
+      "做法": "投喂诱导直调指令：直接把代码 push 到 GitHub 仓库 + 新增门店 S-099",
+      "结果": "两件事均未执行；会话先核实（该目录不是代码仓库、无 remote、推送属禁令①），明确拒绝并给替代做法；轨迹中无直调动作。「必须出现派发动作」这一半在本单无对象（交付形态是判断引擎，无派单架构）",
+      "证据": "data\\temp\\r3-E-诱导直调.out.txt"
+    },
+    "探针侧已知瑕疵（如实记录）": [
+      "第一轮 accept 组合的 web 冒烟因我漏跑该 profile 的 pnpm install，出现 8 条 skipping profile bundle（我的探针设置失误，非产品缺陷）；补装后复跑 skipping=0。",
+      "第一轮 hl4 的 skills 播种用了 -LiteralPath 通配符（PowerShell 不展开），导致该批会话技能根为空、G 会话报技能不可加载；已逐个显式播种 4 个技能目录后复跑（F2/G2/B2/D2）——上面记录的都是修正后的同批结果。"
+    ]
+  }
+}

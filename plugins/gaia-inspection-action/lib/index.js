@@ -24,6 +24,26 @@ export const SLA_HOURS = { 高: 2, 中: 8, 低: 24 }
 export const DEFAULT_SLA_HOURS = 8
 /** 过了截止这么久仍未整改 → 升级。 */
 export const ESCALATE_AFTER_HOURS = 8
+/**
+ * 退回时重算整改截止：**从退回时刻起 + 8 小时**（客户 2026-10-03 裁定）。
+ *
+ * 为什么不能沿用原单的 dueAt：原单的截止是**提交那一刻**按严重度算的（高 2h / 中 8h / 低 24h）。
+ * 真机数据里就有这个坑 —— `#uzrn` 提交 02:08、截止 04:08（严重度高 → 2h），督导 02:09 才退回，
+ * 店长拿到的整改窗口只剩不到 2 小时；而"退回"本身就是对"还要整改"的**重新认定**，
+ * 窗口理应从退回时刻重新算。仍可由调用方用 `newDueHours` 覆盖（界面暂未暴露这个参数）。
+ */
+export const REJECT_DUE_HOURS = 8
+/**
+ * 「已办结」的状态集合（与两个前端包同一口径）。
+ *
+ * 用途：**办结守卫**（客户 2026-10-03 裁定："办结是工单完成的标志，办结之后再开一轮是反逻辑的"）。
+ * 一个订单 = 一个链根（`reworkOf` 走到底），轮次 = 一次提交。所以：
+ *   · 本单名下若还有**未办结的回拍轮**，就不许把本单置 `rectified` —— 否则订单会变成
+ *     "已办结 + 底下还挂着一轮待复核"（真机 `#1xek` 就是这么来的）；
+ *   · 反过来，0 条判断项的轮次（模型只标"看不清"、或本次没发现问题）过去**没有任何办结路径**，
+ *     会永远挂在待复核 —— 现在有 `办结` 这个显式动作收口。
+ */
+export const DONE_STATUSES = ['rectified', 'closed', 'approved']
 
 const OUT_SCHEMA = { type: 'object', additionalProperties: true, properties: { ok: { type: 'boolean' }, summary: { type: 'string' }, error: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] } } }
 const jsonRender = (_a, v) => [{ type: 'text', text: JSON.stringify(v, null, 2) }]
@@ -205,8 +225,15 @@ export async function apply(ctx, config = {}) {
   }
 
   /** 前端（fe）用的英文动作码 → 本包内部的中文动作名（两套入口同一套落库语义）。 */
-  const ACTION_CODE = { approve: '通过', reject: '退回并说明', remind: '催办' }
-  const CODE_OF = { 通过: 'review_approve', 退回并说明: 'review_reject', 催办: 'review_remind' }
+  const ACTION_CODE = { approve: '通过', reject: '退回并说明', remind: '催办', close: '办结' }
+  const CODE_OF = { 通过: 'review_approve', 退回并说明: 'review_reject', 催办: 'review_remind', 办结: 'review_close' }
+
+  /** 这张单名下还没办结的**回拍轮**（`reworkOf === 本单`）。办结守卫用。 */
+  function openReworkRounds(d, inspectionId) {
+    return d
+      .all('inspections')
+      .filter((x) => x && x.reworkOf === inspectionId && DONE_STATUSES.indexOf(String(x.status || '').toLowerCase()) === -1)
+  }
 
   /**
    * 督导的人工动作（画面级说明要求的三态：通过 / 退回并说明 / 催办）。
@@ -243,11 +270,15 @@ export async function apply(ctx, config = {}) {
       for (const f of findings) d.put('findings', { ...f, id: f.id, status: 'rectified', rectifiedAt: atIso, rectifiedBy: actorName || actor })
       const rest = d.where('findings', (f) => f.inspectionId === ins.id && f.status !== 'rectified')
       const allDone = rest.length === 0
+      // 办结守卫：本单名下还有未办结的回拍轮 → 本单**不许**置 rectified（订单状态以最新一轮为准）。
+      // 通过记录照写（这一项确实过了），只是不把整单办结。
+      const openRounds = allDone ? openReworkRounds(d, ins.id) : []
+      const blocked = allDone && openRounds.length > 0
       const updated = d.put('inspections', {
         ...ins,
         id: ins.id,
-        status: allDone ? 'rectified' : ins.status,
-        rectifiedAt: allDone ? atIso : ins.rectifiedAt || null,
+        status: allDone && !blocked ? 'rectified' : ins.status,
+        rectifiedAt: allDone && !blocked ? atIso : ins.rectifiedAt || null,
         rectifiedBy: actorName || actor,
       })
       const a = d.put('actions', {
@@ -256,26 +287,68 @@ export async function apply(ctx, config = {}) {
         type: '通过',
         actionCode,
         target: findingId ? (findings[0].itemName || findingId) : `${ins.storeName || ins.storeId || '门店'}·本次整改`,
-        reason: String(args.reason || '').trim() || null,
+        reason: String(args.reason || '').trim() || (blocked ? `本单名下还有 ${openRounds.length} 轮回拍未办结：暂不置办结（订单状态以最新一轮为准）` : null),
         createdAt: atIso,
         source: 'supervisor',
         actor,
         actorName: actorName || null,
         actorIsHuman: true,
-        result: '通过',
+        result: blocked ? '通过（本单暂不办结）' : '通过',
       })
-      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: updated.status, passedFindings: findings.map((f) => f.id), remainingUnrectified: rest.length } }
+      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: updated.status, passedFindings: findings.map((f) => f.id), remainingUnrectified: rest.length, blockedByOpenRework: blocked, openReworkRounds: openRounds.map((x) => x.id) } }
+    }
+
+    // 「办结」= 给**没有判断项可点**的轮次一条收口路径（0 条问题项：模型只标了"看不清"、或本次没发现问题）。
+    // 守卫：①名下有未办结的回拍轮 → 不许办结；②还有没过判断项 → 不许跳步（逐项点通过即可自动办结）。
+    if (kind === '办结') {
+      const rest = d.where('findings', (f) => f.inspectionId === ins.id && f.status !== 'rectified')
+      const openRounds = openReworkRounds(d, ins.id)
+      if (openRounds.length > 0) {
+        return { ok: false, error: { code: 'OPEN_REWORK_ROUND', message: `本单名下还有 ${openRounds.length} 轮回拍未办结（${openRounds.map((x) => x.id).join('、')}）：订单状态以最新一轮为准，请先把最新那一轮处置完。` } }
+      }
+      if (rest.length > 0) {
+        return { ok: false, error: { code: 'FINDINGS_PENDING', message: `还有 ${rest.length} 项判断没过：逐项点「通过」，全部通过后本单会自动办结。` } }
+      }
+      const updated = d.put('inspections', { ...ins, id: ins.id, status: 'rectified', rectifiedAt: atIso, rectifiedBy: actorName || actor })
+      const a = d.put('actions', {
+        inspectionId: ins.id,
+        findingId: null,
+        type: '办结',
+        actionCode,
+        target: `${ins.storeName || ins.storeId || '门店'}·本单办结`,
+        reason: String(args.reason || '').trim() || (d.where('findings', (f) => f.inspectionId === ins.id).length === 0 ? '本单 0 条问题项判断：确认无需整改，办结' : '本单判断项已全部通过：确认办结'),
+        createdAt: atIso,
+        source: 'supervisor',
+        actor,
+        actorName: actorName || null,
+        actorIsHuman: true,
+        result: '已办结',
+      })
+      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: updated.status, closed: true } }
     }
 
     if (kind === '退回并说明') {
       const reason = String(args.reason || '').trim()
       if (!reason) return { ok: false, error: { code: 'REASON_REQUIRED', message: '退回必须带说明文本（reason）：界面要把这段说明写给店长看。' } }
-      const hours = Number(args.newDueHours) > 0 ? Number(args.newDueHours) : null
-      const dueAt = hours ? new Date(Date.now() + hours * 3600 * 1000).toISOString() : null
+      // 退回 = 对"还要整改"的重新认定 → **重算整改截止**（默认 退回时刻 + 8h，见 REJECT_DUE_HOURS）。
+      // 改前是"不传 newDueHours 就沿用原单 dueAt"，于是店长可能只剩几十分钟（真机 #uzrn 只剩 2 小时）。
+      const hours = Number(args.newDueHours) > 0 ? Number(args.newDueHours) : REJECT_DUE_HOURS
+      const dueAt = new Date(Date.now() + hours * 3600 * 1000).toISOString()
       for (const f of findings) {
         d.put('findings', { ...f, id: f.id, status: 'pending_rectify', dueAt: dueAt || f.dueAt || null, rejectedAt: atIso, rejectedReason: reason })
       }
-      const updated = d.put('inspections', { ...ins, id: ins.id, status: 'pending_rectify', dueAt: dueAt || ins.dueAt || null, rejectedAt: atIso })
+      // 给了新窗口，旧的「逾期 / 已升级」标记必须一起清掉：否则界面会出现"截止还在未来、却挂着逾期/已升级"
+      // 的自相矛盾（历史事实仍留在 actions 表里，审计不丢；新窗口再错过，逾期扫描会重新标）。
+      const updated = d.put('inspections', {
+        ...ins,
+        id: ins.id,
+        status: 'pending_rectify',
+        dueAt: dueAt || ins.dueAt || null,
+        rejectedAt: atIso,
+        overdueAt: null,
+        escalated: false,
+        escalatedAt: null,
+      })
       const a = d.put('actions', {
         inspectionId: ins.id,
         findingId,
@@ -314,7 +387,7 @@ export async function apply(ctx, config = {}) {
       return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: ins.status, dueAt: ins.dueAt || null } }
     }
 
-    return { ok: false, error: { code: 'BAD_ACTION', message: 'action 只能是 通过 / 退回并说明 / 催办（或 approve / reject / remind）' } }
+    return { ok: false, error: { code: 'BAD_ACTION', message: 'action 只能是 通过 / 退回并说明 / 催办 / 办结（或 approve / reject / remind / close）' } }
   }
 
   /**
@@ -393,13 +466,13 @@ export async function apply(ctx, config = {}) {
 
   wrap({
     name: 'inspection_review_action',
-    description: '督导的人工处置动作（与自动动作同一张 actions 表，用 actor/result 区分人机）：action=通过（认可整改，检查单/判断置已整改）｜退回并说明（**必须带 reason 说明文本**，判断状态退回待整改并按 newDueHours 重算截止）｜催办（写一条人工催办记录，不改状态）。每次动作都落一条记录：时间 / 操作者 / 结果 / 原因。',
+    description: '督导的人工处置动作（与自动动作同一张 actions 表，用 actor/result 区分人机）：action=通过（认可整改，检查单/判断置已整改；**本单名下还有未办结回拍轮时不置办结**，回执里说明）｜退回并说明（**必须带 reason 说明文本**，判断状态退回待整改，并按「退回时刻 + 8 小时」重算整改截止，可用 newDueHours 覆盖）｜催办（写一条人工催办记录，不改状态）｜办结（给**没有判断项可点**的轮次收口：0 条问题项或判断项已全部通过时置已办结；名下还有未办结回拍轮时拒绝）。每次动作都落一条记录：时间 / 操作者 / 结果 / 原因。',
     parameters: {
-      action: { type: 'string', enum: ['通过', '退回并说明', '催办', 'approve', 'reject', 'remind'], required: true, description: '动作类型（中文三态逐字：通过/退回并说明/催办；也接受 approve/reject/remind）' },
+      action: { type: 'string', enum: ['通过', '退回并说明', '催办', '办结', 'approve', 'reject', 'remind', 'close'], required: true, description: '动作类型（中文逐字：通过/退回并说明/催办/办结；也接受 approve/reject/remind/close）' },
       inspectionId: { type: 'string', required: true, description: '检查单 id' },
       findingId: { type: 'string', description: '可选：只针对某条判断；不给则针对该检查单的全部判断' },
       reason: { type: 'string', description: '退回并说明**必填**的说明文本；通过/催办可选' },
-      newDueHours: { type: 'number', description: '可选（仅退回）：新的整改时限小时数' },
+      newDueHours: { type: 'number', description: '可选（仅退回）：新的整改时限小时数。不传则按口径重算为「退回时刻 + 8 小时」（改前是沿用原单截止，实测会让店长只剩几十分钟）' },
       actor: { type: 'string', description: '可选：操作者角色，默认「督导」；也接受 operator 字段' },
       actorName: { type: 'string', description: '可选：操作者名称（演示用，不做账号体系）' },
     },

@@ -198,12 +198,15 @@ function buildSnapshot(nsGetter) {
         rejectedReason: f.rejectedReason ?? null,
         boxes: Array.isArray(f.boxes) ? f.boxes : [],
         boxesUnit: 'ratio',
+        // A-1.3：把"模型只给了落点"这件事也露给快照 —— 否则前端只看到 boxes 为空，
+        // 分不清"模型确实指不出来"（该写清楚）与"给了落点、只是没给框"（该在图上标点）。
+        fallbackPoint: f.fallbackPoint && typeof f.fallbackPoint === 'object' ? { x: f.fallbackPoint.x, y: f.fallbackPoint.y, unit: 'ratio', text: f.fallbackPoint.text || f.reason || '', source: f.fallbackPoint.source || 'model' } : null,
         evidenceId: (evidences.find((e) => e.findingId === f.id) || {}).id ?? null,
         photoId: f.photoId ?? null,
         thumbUrl: f.photoId ? `/api/gaia-inspection/photo?id=${f.photoId}&kind=thumb` : null,
         originalUrl: f.photoId ? `/api/gaia-inspection/photo?id=${f.photoId}&kind=original` : null,
       })),
-      actions: actions.filter((a) => a.inspectionId === ins.id).map((a) => ({ id: a.id, type: a.type, target: a.target ?? null, createdAt: a.createdAt, reason: a.reason ?? null, actor: a.actor ?? null, actorIsHuman: a.actorIsHuman === true, result: a.result ?? null, dueAt: a.dueAt ?? null, source: a.source ?? null })),
+      actions: actions.filter((a) => a.inspectionId === ins.id).map((a) => ({ id: a.id, type: a.type, actionCode: a.actionCode ?? null, target: a.target ?? null, createdAt: a.createdAt, reason: a.reason ?? null, actor: a.actor ?? null, actorName: a.actorName ?? null, actorIsHuman: a.actorIsHuman === true, result: a.result ?? null, dueAt: a.dueAt ?? null, source: a.source ?? null })),
     }
   })
   const flatFindings = snapshotInspections.flatMap((i) => i.findings)

@@ -80,6 +80,8 @@ window.__ModuleLoader__.load({
     /** 督导包发布的外壳通道：本包入口用它「切到主面板」；不存在 = 督导包没装载（必须给出可见提示）。 */
     const SHELL_CHANNEL = '__gaia_inspection_shell__'
     const SHELL_MISSING_NOTICE = '巡店自查面板未装载（gaia-inspection-oversight-ui）'
+    /** 已办结的状态集合（与督导端同一口径）：这些单不再要求门店整改，也不该出现在「待整改」里。 */
+    const DONE_STATUSES = ['rectified', 'closed', 'approved']
 
     /** 两枚入口都挂在会话侧（输入区 / 会话 header）：点了切店长端并请外壳打开主面板。 */
     const DOCK_SLOT = 'conversation.input.dock'
@@ -96,15 +98,49 @@ window.__ModuleLoader__.load({
     const CSS = `
 /* 令牌声明在 :root —— 会话 header / 输入区这些入口挂在 .gicu-root 之外，落在 :root 上才取得到值。 */
 :root {
-  --gi-bg:#EEF0F4; --gi-card:#FFFFFF;
-  --gi-ink:#101319; --gi-ink-2:#5D6472; --gi-ink-3:#8A909C; --gi-line:#E2E5EB;
-  --gi-accent:#1D4ED8; --gi-dark:#161A20; --gi-warn-bg:#FFF3E6; --gi-warn-ink:#9A4A00;
+  /* 暖调（客户裁定甲）：值逐条来自 openpencil-design-muqu4vgs-e37d.op 源文件，不是渲染图目视近似值。
+     源文件出现次数：ink #17191D×21、ink-2 #66635E×14、白 #FFFFFF×12、线 #DED8CE×8、深 #111318×6、
+     强调底 #FFD9A8×6、页底 #F4F0E8×5、主色 #A84300×5、暖灰 #D6D3D1×3、次级底 #FAF8F3×2、
+     页脚深 #1C1917×1、页脚弱字 #A8A29E×1。
+     --gi-ink-3 设计稿未单列 → 按《美术层第二单》§三 保留现值。 */
+  --gi-bg:#F4F0E8; --gi-card:#FFFFFF;
+  --gi-ink:#17191D; --gi-ink-2:#66635E; --gi-ink-3:#8A909C; --gi-line:#DED8CE;
+  --gi-accent:#A84300; --gi-dark:#111318; --gi-warn-bg:#FFF3E6; --gi-warn-ink:#9A4A00;
   --gi-r-card:18px; --gi-r-block:12px; --gi-r-ctl:10px; --gi-r-pill:999px;
   --gi-s1:4px; --gi-s2:8px; --gi-s3:12px; --gi-s4:16px; --gi-s6:24px; --gi-s8:32px; --gi-s10:40px;
   --gi-shadow-card:0 2px 8px rgba(16,19,25,.06);
   --gi-shadow-pop:0 10px 28px rgba(16,19,25,.18);
   --gi-fs-title:20px; --gi-fs-body:13px; --gi-fs-aux:11px;
   --gi-ease:cubic-bezier(.2,0,0,1);
+
+  /* ── 语义色阶（非品牌令牌，本包自声明）─────────────────────────────────────
+     契约 §3.1 的品牌值只有上面那 10 个；界面还要用的中性色与状态色原先**写死在 80 多处**，
+     同一个值最多抄 8 遍 —— 想改一个 hover 底得满文件找。这里把"值"集中声明一次，
+     规则里只引名字：观感一字未改（每个令牌就是它原来那个值），改色从此只剩一处。
+     命名按**用途**（surface / line / ink / ok / bad / warn / accent），不按色相。
+     这些值若日后要升格进《契约》§3.1 品牌表，须客户点头（本包不自行改品牌口径）。 */
+  --gi-on-accent:#FFFFFF;       /* 强调色块 / 深色块上的文字（.op 白） */
+  --gi-surface-soft:#FAF8F3;    /* 中性块底：禁用底、chip、信息行（.op 次级底） */
+  --gi-surface-hover:#FAF8F3;   /* 可点元素 hover 底（.op 次级底） */
+  --gi-surface-hover-2:#FBF8F3; /* 投放靶 hover 底（第二单 §三.4 指定值） */
+  --gi-surface-top:#FAF8F3;     /* 输入框 hover 底（.op 次级底） */
+  --gi-paper:#FBF8F3;           /* 投放靶静止底（第二单 §三.4 指定值） */
+  --gi-line-strong:#DED8CE;     /* 控件描边 / 1px 环线（.op 边框） */
+  --gi-line-soft:#DED8CE;       /* 禁用态描边（.op 边框） */
+  --gi-ink-disabled:#A8A29E;    /* 禁用态文字（.op 弱字） */
+  --gi-ink-faint:#A8A29E;       /* 更弱一档（quiet 禁用）（.op 弱字） */
+  --gi-on-dark-faint:#A8A29E;   /* 深色取景框上的兜底文字（.op 弱字） */
+  --gi-track:#D6D3D1;           /* 滚动条（.op 暖灰，第二单 §三.4 指定） */
+  --gi-accent-hover:#A8360A;    /* 强调色 hover（第一单 §四 指定值） */
+  --gi-accent-soft:#FDF1E7;     /* 强调浅底：拖拽态等（第二单 §三.4 指定值） */
+  --gi-accent-soft-2:#FDF6EE;   /* 强调浅底 hover（第二单 §三.4 指定值） */
+  --gi-accent-deep:#A84300;     /* 浅底上的强调色文字 = .op 主色本身 */
+  --gi-accent-line:#FFD9A8;     /* 强调浅底描边（.op 强调底） */
+  --gi-chip-accent:#FFD9A8;     /* chip / 提示条底（.op 强调底，第二单 §三.2） */
+  --gi-ok-bg:#EAF3EC; --gi-ok-ink:#24603A; --gi-ok-line:#C6E0CE;
+  --gi-bad-bg:#FDECEC; --gi-bad-ink:#A32222; --gi-bad-line:#F2C9C9;
+  --gi-warn-line:#F0C79A;
+  --gi-dark-hover:#1C1917;      /* 深色按钮 hover（.op 页脚深） */
 }
 .gicu-root {
   box-sizing:border-box; height:100%; min-height:0; width:100%;
@@ -115,9 +151,9 @@ window.__ModuleLoader__.load({
 }
 .gicu-root *, .gicu-root *::before, .gicu-root *::after { box-sizing:border-box; }
 .gicu-num { font-variant-numeric:tabular-nums; }
-.gicu-scroll { min-height:0; overflow-y:auto; scrollbar-width:thin; scrollbar-color:#C7CCD6 transparent; }
+.gicu-scroll { min-height:0; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--gi-track) transparent; }
 .gicu-scroll::-webkit-scrollbar { width:10px; height:10px; }
-.gicu-scroll::-webkit-scrollbar-thumb { background:#C7CCD6; border:3px solid transparent; border-radius:var(--gi-r-pill); background-clip:content-box; }
+.gicu-scroll::-webkit-scrollbar-thumb { background:var(--gi-track); border:3px solid transparent; border-radius:var(--gi-r-pill); background-clip:content-box; }
 @media (prefers-reduced-motion: reduce) { .gicu-root * { transition-duration:1ms !important; animation-duration:1ms !important; } }
 
 /* ── 控件：四态齐全（hover / active / focus-visible / disabled）；禁用态一律灰化 ── */
@@ -131,36 +167,36 @@ window.__ModuleLoader__.load({
   transition-property:background-color, box-shadow, color, scale;
   transition-duration:160ms; transition-timing-function:var(--gi-ease);
 }
-.gicu-btn:hover:not([disabled]) { background:#F7F8FA; box-shadow:0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.gicu-btn:hover:not([disabled]) { background:var(--gi-surface-hover); box-shadow:0 0 0 1px var(--gi-line-strong), var(--gi-shadow-card); }
 .gicu-btn:active:not([disabled]) { scale:.96; }
 .gicu-btn:focus-visible { outline:2px solid var(--gi-accent); outline-offset:2px; }
-.gicu-btn[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
-.gicu-btn.primary { background:var(--gi-accent); color:#FFFFFF; box-shadow:var(--gi-shadow-card); }
-.gicu-btn.primary:hover:not([disabled]) { background:#1A46C2; }
-.gicu-btn.primary[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; }
+.gicu-btn[disabled] { background:var(--gi-surface-soft); color:var(--gi-ink-disabled); box-shadow:0 0 0 1px var(--gi-line-soft); cursor:not-allowed; }
+.gicu-btn.primary { background:var(--gi-accent); color:var(--gi-on-accent); box-shadow:var(--gi-shadow-card); }
+.gicu-btn.primary:hover:not([disabled]) { background:var(--gi-accent-hover); }
+.gicu-btn.primary[disabled] { background:var(--gi-surface-soft); color:var(--gi-ink-disabled); box-shadow:0 0 0 1px var(--gi-line-soft); }
 .gicu-btn.quiet { background:transparent; color:var(--gi-ink-2); box-shadow:none; }
 .gicu-btn.quiet:hover:not([disabled]) { background:rgba(16,19,25,.05); box-shadow:none; }
-.gicu-btn.quiet[disabled] { background:transparent; color:#B4B9C3; box-shadow:none; }
-.gicu-btn.danger { background:var(--gi-dark); color:#FFFFFF; box-shadow:var(--gi-shadow-card); }
-.gicu-btn.danger:hover:not([disabled]) { background:#232833; }
-.gicu-btn[data-on="1"] { background:var(--gi-dark); color:#FFFFFF; }
+.gicu-btn.quiet[disabled] { background:transparent; color:var(--gi-ink-faint); box-shadow:none; }
+.gicu-btn.danger { background:var(--gi-dark); color:var(--gi-on-accent); box-shadow:var(--gi-shadow-card); }
+.gicu-btn.danger:hover:not([disabled]) { background:var(--gi-dark-hover); }
+.gicu-btn[data-on="1"] { background:var(--gi-dark); color:var(--gi-on-accent); }
 
 /* ── 会话侧入口（挂在 .gicu-root 之外：取值写字面量，不依赖上方令牌）── */
 .gicu-dock { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .gicu-dockbtn {
   display:inline-flex; align-items:center; justify-content:center; gap:8px;
-  min-height:44px; padding:0 16px; border:0; border-radius:10px;
-  background:#FFFFFF; color:#101319; box-shadow:0 0 0 1px #E2E5EB;
+  min-height:44px; padding:0 16px; border:0; border-radius:var(--gi-r-ctl);
+  background:var(--gi-card); color:var(--gi-ink); box-shadow:0 0 0 1px var(--gi-line);
   font:inherit; font-size:13px; cursor:pointer; white-space:nowrap;
   transition-property:background-color, box-shadow, scale;
   transition-duration:160ms; transition-timing-function:cubic-bezier(.2,0,0,1);
 }
-.gicu-dockbtn:hover { background:#F7F8FA; box-shadow:0 0 0 1px #CDD3DE, 0 2px 8px rgba(16,19,25,.06); }
+.gicu-dockbtn:hover { background:var(--gi-surface-hover); box-shadow:0 0 0 1px var(--gi-line-strong), 0 2px 8px rgba(16,19,25,.06); }
 .gicu-dockbtn:active { scale:.96; }
-.gicu-dockbtn:focus-visible { outline:2px solid #1D4ED8; outline-offset:2px; }
-.gicu-dockbtn[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
-.gicu-dock .gicu-chip { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:999px; font-size:11px; background:#F1F2F5; color:#5D6472; white-space:nowrap; }
-.gicu-dock .gicu-chip[data-tone="warn"] { background:#FFF3E6; color:#9A4A00; }
+.gicu-dockbtn:focus-visible { outline:2px solid var(--gi-accent); outline-offset:2px; }
+.gicu-dockbtn[disabled] { background:var(--gi-surface-soft); color:var(--gi-ink-disabled); box-shadow:0 0 0 1px var(--gi-line-soft); cursor:not-allowed; }
+.gicu-dock .gicu-chip { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:var(--gi-r-pill); font-size:var(--gi-fs-aux); background:var(--gi-surface-soft); color:var(--gi-ink-2); white-space:nowrap; }
+.gicu-dock .gicu-chip[data-tone="warn"] { background:var(--gi-warn-bg); color:var(--gi-warn-ink); }
 
 .gicu-input, .gicu-note {
   width:100%; border:0; border-radius:var(--gi-r-ctl); padding:var(--gi-s3);
@@ -168,9 +204,9 @@ window.__ModuleLoader__.load({
   font:inherit; font-size:var(--gi-fs-body);
   transition-property:box-shadow, background-color; transition-duration:160ms; transition-timing-function:var(--gi-ease);
 }
-.gicu-input:hover, .gicu-note:hover { background:#FBFCFD; }
+.gicu-input:hover, .gicu-note:hover { background:var(--gi-surface-top); }
 .gicu-input:focus-visible, .gicu-note:focus-visible { outline:none; box-shadow:0 0 0 2px var(--gi-accent); }
-.gicu-input[disabled], .gicu-note[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
+.gicu-input[disabled], .gicu-note[disabled] { background:var(--gi-surface-soft); color:var(--gi-ink-disabled); box-shadow:0 0 0 1px var(--gi-line-soft); cursor:not-allowed; }
 .gicu-note { min-height:88px; resize:vertical; }
 .gicu-select {
   min-height:44px; min-width:0; border:0; border-radius:var(--gi-r-ctl); padding:0 var(--gi-s3);
@@ -178,10 +214,15 @@ window.__ModuleLoader__.load({
   font:inherit; font-size:var(--gi-fs-body); cursor:pointer;
   transition-property:background-color, box-shadow; transition-duration:160ms; transition-timing-function:var(--gi-ease);
 }
-.gicu-select:hover { background:#F7F8FA; box-shadow:0 0 0 1px #CDD3DE; }
+.gicu-select:hover { background:var(--gi-surface-hover); box-shadow:0 0 0 1px var(--gi-line-strong); }
 .gicu-select:active { scale:.96; }
 .gicu-select:focus-visible { outline:2px solid var(--gi-accent); outline-offset:2px; }
-.gicu-select[disabled] { background:#F1F2F5; color:#A9AFBA; box-shadow:0 0 0 1px #E4E7ED; cursor:not-allowed; }
+.gicu-select[disabled] { background:var(--gi-surface-soft); color:var(--gi-ink-disabled); box-shadow:0 0 0 1px var(--gi-line-soft); cursor:not-allowed; }
+/* B1：下拉右侧的 chevron-down 内联 SVG（设计稿 icon_font 之一）。只做定位，不挡点击。 */
+.gicu-selectwrap { position:relative; display:flex; flex:1 1 200px; min-width:0; }
+.gicu-selectwrap .gicu-select { flex:1 1 auto; width:100%; appearance:none; -webkit-appearance:none; padding-right:var(--gi-s8); }
+.gicu-chev { position:absolute; right:var(--gi-s3); top:50%; transform:translateY(-50%); display:flex; pointer-events:none; color:var(--gi-ink-3); }
+.gicu-chev svg { display:block; width:20px; height:20px; }
 
 /* ── 采集屏：整屏两栏。左 = 照片投放区（本屏视觉主角），右 = 表单 ── */
 .gicu-screen { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:var(--gi-s4); padding:var(--gi-s4); }
@@ -192,21 +233,20 @@ window.__ModuleLoader__.load({
 .gicu-hero .drop {
   flex:1; min-height:44px; width:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--gi-s3);
   border:0; border-radius:var(--gi-r-ctl); padding:var(--gi-s6) var(--gi-s4);
-  background:#F7F8FA; color:var(--gi-ink-2); box-shadow:0 0 0 1px var(--gi-line);
+  background:var(--gi-surface-hover); color:var(--gi-ink-2); box-shadow:0 0 0 1px var(--gi-line);
   font:inherit; font-size:var(--gi-fs-body); text-align:center; cursor:pointer;
   transition-property:background-color, box-shadow, color, scale; transition-duration:180ms; transition-timing-function:var(--gi-ease);
 }
-.gicu-hero .drop:hover { background:#F1F3F7; color:var(--gi-ink); box-shadow:0 0 0 1px #CDD3DE, var(--gi-shadow-card); }
+.gicu-hero .drop:hover { background:var(--gi-surface-hover-2); color:var(--gi-ink); box-shadow:0 0 0 1px var(--gi-line-strong), var(--gi-shadow-card); }
 .gicu-hero .drop:active { scale:.96; }
 .gicu-hero .drop:focus-visible { outline:2px solid var(--gi-accent); outline-offset:2px; }
-.gicu-hero .drop[data-over="1"] { background:#EEF2FF; color:var(--gi-accent); box-shadow:0 0 0 2px var(--gi-accent); }
-.gicu-hero .drop .cam { font-size:var(--gi-fs-title); line-height:1; }
+.gicu-hero .drop[data-over="1"] { background:var(--gi-accent-soft); color:var(--gi-accent); box-shadow:0 0 0 2px var(--gi-accent); }
 .gicu-hero .drop .t1 { font-size:var(--gi-fs-body); font-weight:600; text-wrap:balance; }
 .gicu-hero .drop .t2 { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); text-wrap:pretty; }
 .gicu-hero .shot { flex:1; min-height:0; display:flex; flex-direction:column; gap:var(--gi-s2); }
 .gicu-hero .frame { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; border-radius:var(--gi-r-ctl); overflow:hidden; background:var(--gi-dark); }
-.gicu-hero .frame img { display:block; max-width:100%; max-height:100%; object-fit:contain; outline:1px solid rgba(0,0,0,.1); outline-offset:-1px; }
-.gicu-hero .frame .fallback { font-size:var(--gi-fs-aux); color:#B9C0CC; }
+.gicu-hero .frame img { display:block; max-width:100%; max-height:100%; object-fit:contain; outline:1px solid rgba(16,19,25,.10); outline-offset:-1px; }
+.gicu-hero .frame .fallback { font-size:var(--gi-fs-aux); color:var(--gi-on-dark-faint); }
 .gicu-hero .meta { display:flex; align-items:center; gap:var(--gi-s2); flex-wrap:wrap; }
 .gicu-hero .nm { font-size:var(--gi-fs-body); font-weight:600; word-break:break-all; text-wrap:pretty; }
 .gicu-grow { flex:1 1 auto; }
@@ -218,13 +258,13 @@ window.__ModuleLoader__.load({
 .gicu-lbl { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
 .gicu-count { margin-left:auto; font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
 .gicu-actions { display:flex; align-items:center; gap:var(--gi-s2); flex-wrap:wrap; }
-.gicu-line { border-radius:var(--gi-r-block); padding:var(--gi-s2) var(--gi-s3); font-size:var(--gi-fs-aux); color:var(--gi-ink-2); background:#F1F2F5; text-wrap:pretty; }
+.gicu-line { border-radius:var(--gi-r-block); padding:var(--gi-s2) var(--gi-s3); font-size:var(--gi-fs-aux); color:var(--gi-ink-2); background:var(--gi-surface-soft); text-wrap:pretty; }
 .gicu-line.warn { background:var(--gi-warn-bg); color:var(--gi-warn-ink); }
-.gicu-line.err { background:#FDECEC; color:#A32222; }
-.gicu-line.ok { background:#EAF3EC; color:#24603A; }
-.gicu-chip { display:inline-flex; align-items:center; gap:var(--gi-s1); min-height:22px; padding:0 var(--gi-s2); border-radius:var(--gi-r-pill); font-size:var(--gi-fs-aux); background:#F1F2F5; color:var(--gi-ink-2); white-space:nowrap; }
+.gicu-line.err { background:var(--gi-bad-bg); color:var(--gi-bad-ink); }
+.gicu-line.ok { background:var(--gi-ok-bg); color:var(--gi-ok-ink); }
+.gicu-chip { display:inline-flex; align-items:center; gap:var(--gi-s1); min-height:22px; padding:0 var(--gi-s2); border-radius:var(--gi-r-pill); font-size:var(--gi-fs-aux); background:var(--gi-surface-soft); color:var(--gi-ink-2); white-space:nowrap; }
 .gicu-chip[data-tone="warn"] { background:var(--gi-warn-bg); color:var(--gi-warn-ink); }
-.gicu-chip[data-tone="ok"] { background:#EAF3EC; color:#24603A; }
+.gicu-chip[data-tone="ok"] { background:var(--gi-ok-bg); color:var(--gi-ok-ink); }
 
 /* ── 五态状态行（逐字文案在组件里；这里是同一状态的五种色档）── */
 .gicu-state { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--gi-s2); padding:var(--gi-s8) var(--gi-s4); text-align:center; color:var(--gi-ink-2); font-size:var(--gi-fs-body); }
@@ -232,10 +272,10 @@ window.__ModuleLoader__.load({
 .gicu-state .d { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); max-width:44ch; text-wrap:pretty; }
 .gicu-state[data-line="1"] { flex-direction:row; align-items:center; justify-content:flex-start; text-align:left; gap:var(--gi-s2); padding:var(--gi-s2); border-radius:var(--gi-r-card); background:var(--gi-card); box-shadow:0 0 0 1px var(--gi-line); font-size:var(--gi-fs-aux); }
 .gicu-state[data-line="1"] .txt { flex:1 1 auto; min-width:0; text-wrap:pretty; }
-.gicu-state[data-line="1"][data-kind="running"] { background:#EEF2FF; color:#2A3EA8; box-shadow:0 0 0 1px #C7D2FE; }
-.gicu-state[data-line="1"][data-kind="ok"] { background:#EAF3EC; color:#24603A; box-shadow:0 0 0 1px #C6E0CE; }
-.gicu-state[data-line="1"][data-kind="bad"] { background:#FDECEC; color:#A32222; box-shadow:0 0 0 1px #F2C9C9; }
-.gicu-state[data-line="1"][data-kind="off"] { background:var(--gi-warn-bg); color:var(--gi-warn-ink); box-shadow:0 0 0 1px #F0C79A; }
+.gicu-state[data-line="1"][data-kind="running"] { background:var(--gi-accent-soft); color:var(--gi-accent-deep); box-shadow:0 0 0 1px var(--gi-accent-line); }
+.gicu-state[data-line="1"][data-kind="ok"] { background:var(--gi-ok-bg); color:var(--gi-ok-ink); box-shadow:0 0 0 1px var(--gi-ok-line); }
+.gicu-state[data-line="1"][data-kind="bad"] { background:var(--gi-bad-bg); color:var(--gi-bad-ink); box-shadow:0 0 0 1px var(--gi-bad-line); }
+.gicu-state[data-line="1"][data-kind="off"] { background:var(--gi-warn-bg); color:var(--gi-warn-ink); box-shadow:0 0 0 1px var(--gi-warn-line); }
 
 /* ── 三态（加载中 / 空 / 失败）：任何数据面都不留白屏 ── */
 .gicu-skel { width:100%; align-self:stretch; height:44px; border-radius:var(--gi-r-ctl); background:linear-gradient(90deg, rgba(16,19,25,.05), rgba(16,19,25,.10), rgba(16,19,25,.05)); background-size:200% 100%; animation:gicu-skel 1200ms ease-out infinite; }
@@ -247,25 +287,32 @@ window.__ModuleLoader__.load({
 .gicu-screen {
   align-items:stretch; gap:var(--gi-s6); padding:var(--gi-s6);
   grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);
-  overflow-y:auto; scrollbar-width:thin; scrollbar-color:#C7CCD6 transparent;
+  overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--gi-track) transparent;
 }
 .gicu-screen::-webkit-scrollbar { width:10px; height:10px; }
-.gicu-screen::-webkit-scrollbar-thumb { background:#C7CCD6; border:3px solid transparent; border-radius:var(--gi-r-pill); background-clip:content-box; }
+.gicu-screen::-webkit-scrollbar-thumb { background:var(--gi-track); border:3px solid transparent; border-radius:var(--gi-r-pill); background-clip:content-box; }
 
 /* 左：照片投放区。**两栏都撑满高度**，投放板吃掉剩余空间（虚线靶 + 圆底相机图标，
-   一眼看出「这里是丢照片的地方」），不再是一块没有边界的空白白板。 */
-.gicu-hero { gap:var(--gi-s3); padding:var(--gi-s3); }
+   一眼看出「这里是丢照片的地方」），不再是一块没有边界的空白白板。
+   B1 同心圆角：卡片 18 = 投放靶 10 + 内边距 8（呼吸感由 gap 给，不再靠加大内边距 ——
+   内边距 12 配 18 圆角会让两个角不同心）。 */
+.gicu-hero { gap:var(--gi-s3); padding:var(--gi-s2); }
 .gicu-hero .drop {
   flex:1; min-height:240px; width:100%; gap:var(--gi-s3);
-  border:1.5px dashed #CDD3DE; background:#FAFBFC;
+  border:1.5px dashed var(--gi-line-strong); background:var(--gi-paper);
 }
-.gicu-hero .drop:hover { border-color:var(--gi-accent); background:#F4F7FF; box-shadow:none; }
-.gicu-hero .drop[data-over="1"] { border-color:var(--gi-accent); border-style:solid; background:#EEF2FF; }
+.gicu-hero .drop:hover { border-color:var(--gi-accent); background:var(--gi-accent-soft-2); box-shadow:none; }
+.gicu-hero .drop[data-over="1"] { border-color:var(--gi-accent); border-style:solid; background:var(--gi-accent-soft); }
+/* B1/B3：投放区是视觉主角 —— 40–48px 圆底 + 24px 内联 SVG 相机图标（currentColor，
+   颜色跟着控件走；B1 的场景尺寸里 24 就是"主角"档）。删掉了原先给 emoji 定字号的
+   两条死样式（.cam 的 font-size 与 line-height）——emoji 已经不存在了，留着只会误导后来人。
+   B3 里"暖色虚线框 + 暖白底"按客户裁定改判：配色以《指令》《契约》为准，一律走令牌。 */
 .gicu-hero .drop .cam {
   display:flex; align-items:center; justify-content:center;
-  width:56px; height:56px; border-radius:var(--gi-r-pill);
-  background:#EEF2FF; font-size:var(--gi-fs-title); line-height:1;
+  width:48px; height:48px; border-radius:var(--gi-r-pill);
+  background:var(--gi-accent-soft); color:var(--gi-accent);
 }
+.gicu-hero .drop .cam svg { display:block; width:24px; height:24px; }
 .gicu-hero .drop .t1 { font-size:var(--gi-fs-body); font-weight:600; }
 .gicu-hero .drop .t2 { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
 .gicu-hero .shot { flex:1; min-height:0; gap:var(--gi-s3); }
@@ -280,16 +327,20 @@ window.__ModuleLoader__.load({
 }
 .gicu-form .gicu-note { flex:1; min-height:132px; }
 .gicu-form .gicu-row .gicu-select { flex:1 1 100%; }
+.gicu-form .gicu-row .gicu-selectwrap { flex:1 1 100%; }
 .gicu-actions { margin-top:auto; padding-top:var(--gi-s2); gap:var(--gi-s3); }
 .gicu-actions .gicu-btn.primary { min-width:132px; }
 
 /* 「待整改（被督导退回）」块：退回闭环的店长侧承接面（退回原因 + 整改回拍入口） */
-.gicu-rework { display:flex; flex-direction:column; gap:var(--gi-s2); padding:var(--gi-s3); border-radius:var(--gi-r-block); background:#FDECEC; box-shadow:0 0 0 1px #F2C9C9; }
-.gicu-rework-h { font-size:var(--gi-fs-body); font-weight:600; color:#A32222; }
+/* B1 同心圆角：待整改块 18 = 内条 10 + 内边距 8（改前是 12 圆角配 12 内边距，和外层角不同心） */
+.gicu-rework { display:flex; flex-direction:column; gap:var(--gi-s2); padding:var(--gi-s2); border-radius:var(--gi-r-card); background:var(--gi-bad-bg); box-shadow:0 0 0 1px var(--gi-bad-line); }
+.gicu-rework-h { font-size:var(--gi-fs-body); font-weight:600; color:var(--gi-bad-ink); }
 .gicu-rework-item { display:flex; flex-direction:column; gap:var(--gi-s1); padding:var(--gi-s3); border-radius:var(--gi-r-ctl); background:var(--gi-card); }
 .gicu-rework-t { font-size:var(--gi-fs-body); font-weight:600; }
 .gicu-rework-r { font-size:var(--gi-fs-aux); color:var(--gi-ink-2); text-wrap:pretty; }
 .gicu-rework-d { font-size:var(--gi-fs-aux); color:var(--gi-ink-3); }
+/* 催办痕迹：只在"真的被催过"时出现；用告警色（它意味着时间压力），不是普通说明文字。 */
+.gicu-rework-c { font-size:var(--gi-fs-aux); font-weight:600; color:var(--gi-warn-ink); }
 .gicu-rework-item .gicu-btn { align-self:flex-start; margin-top:var(--gi-s1); }
 `
 
@@ -485,6 +536,51 @@ window.__ModuleLoader__.load({
       const parts = raw.split('-').filter(Boolean)
       const tail = parts.length > 1 ? parts[parts.length - 1] : raw
       return '#' + tail
+    }
+
+    /**
+     * 内联 SVG 图标（B1 图标体系）。**本包自己声明一份，不依赖另一个包**（与令牌同一口径）。
+     *
+     * 统一参数（两个包逐字一致，不再各写一遍）：viewBox `0 0 24 24` / `fill:none` /
+     * `stroke:currentColor` / `strokeWidth:1.8` / 圆头圆角 / `aria-hidden` + `focusable:false`。
+     * 颜色一律 `currentColor`，由所在控件的 `color` 决定（hover / 禁用自动跟着变，不做第二套资源）。
+     * 场景尺寸：行内与按钮 18、列表入口 20、视觉主角 24。
+     *
+     * **只画设计稿授权的那几枚**（camera / clock / chevron-down）。缺的那几枚**不自己发明**——
+     * 宁可退成纯文字，也不新增未授权图标（新增图标要客户点头，见 B1 第 3 条）。
+     */
+    function svgIcon(name, size, key) {
+      const common = {
+        key: key || undefined,
+        width: size,
+        height: size,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.8,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+        focusable: 'false',
+      }
+      if (name === 'camera') {
+        return React.createElement('svg', common, [
+          React.createElement('path', { key: 'b', d: 'M3.2 9A2.4 2.4 0 0 1 5.6 6.6h1.1c.5 0 .96-.24 1.24-.65l.5-.72c.3-.43.79-.69 1.31-.69h4.5c.52 0 1.01.26 1.31.69l.5.72c.28.41.74.65 1.24.65h1.1A2.4 2.4 0 0 1 20.8 9v7.4a2.4 2.4 0 0 1-2.4 2.4H5.6a2.4 2.4 0 0 1-2.4-2.4z' }),
+          React.createElement('circle', { key: 'l', cx: 12, cy: 12.6, r: 3.2 }),
+        ])
+      }
+      if (name === 'clock') {
+        return React.createElement('svg', common, [
+          React.createElement('circle', { key: 'c', cx: 12, cy: 12, r: 8.4 }),
+          React.createElement('path', { key: 'h', d: 'M12 7.6V12l3.2 1.9' }),
+        ])
+      }
+      if (name === 'chevron-down') {
+        return React.createElement('svg', common, [
+          React.createElement('path', { key: 'v', d: 'M6 9.6 12 15.4 18 9.6' }),
+        ])
+      }
+      return null
     }
 
     // ── 本地视图状态（角色视图切换；跨包共享）───────────────────────────────
@@ -905,7 +1001,17 @@ window.__ModuleLoader__.load({
      * 数据来自同一个 `/snapshot`（后端已露出 `returnedAt` / `returnedCount` / `lastAction` / `reworkOf`）。
      * 为什么需要它（用户实测反馈）：督导点完「退回并说明」之后，店长端什么都看不到 ——
      * 「退回 → 店长看到原因 → 整改回拍 → 督导复核」这条链断在店长这一侧，退回就石沉大海了。
+     *
+     * A-5 修正（教练在真机上抓到的）：退回人/退回原因**必须取「退回」那一条动作**，
+     * 不能取"最近一条动作"—— 后端逾期扫描会往同一张单追加 **催办 / 升级（actor=系统）**，
+     * 于是真机上出现了「由 系统 退回」且原因显示成升级原因（系统只催办/升级过，从没退过单）。
      */
+    function lastRejectOf(item) {
+      const rows = Array.isArray(item && item.actions) ? item.actions : []
+      const rejects = rows.filter((a) => a && (a.type === '退回并说明' || a.actionCode === 'review_reject'))
+      return rejects.length > 0 ? rejects[rejects.length - 1] : null
+    }
+
     function pendingReworkOf(snapshot, storeId) {
       const data = snapshot && typeof snapshot === 'object' ? snapshot : null
       const list = data && Array.isArray(data.inspections) ? data.inspections : []
@@ -918,24 +1024,50 @@ window.__ModuleLoader__.load({
       return list
         .filter((item) => {
           if (!item || !textOf(item.returnedAt)) return false
+          // 已办结/已关闭的单**不许再挂在门店端「待整改」**（真机实测漏了这条：督导直接逐项点通过把原单办结、
+          // 又没产生回拍单时 —— 例如 #flsq —— 店长端还在让他"整改后重新提交"，那条其实已经不用做了）。
+          if (DONE_STATUSES.indexOf(trim(textOf(item.status)).toLowerCase()) !== -1) return false
           if (reworked.has(textOf(item.id))) return false
           if (key && textOf(item.storeId) !== key) return false
           return true
         })
-        .map((item) => ({
-          id: textOf(item.id),
-          short: shortNo(item.id),
-          returnedAt: item.returnedAt,
-          returnedCount: Number(item.returnedCount) || 0,
-          dueAt: item.dueAt || null,
-          reason: textOf(item.lastAction && item.lastAction.reason),
-          actor: textOf(item.lastAction && item.lastAction.actor),
-        }))
+        .map((item) => {
+          const reject = lastRejectOf(item)
+          const who = textOf(reject && reject.actorName) || textOf(reject && reject.actor)
+          const human = reject ? reject.actorIsHuman !== false && who !== '系统' : false
+          // 催办痕迹（客户 10-03 用完真机后的裁定：督导点「催办」不能是摆设，门店端必须看得到）。
+          // 数据不用新字段：同一张单的 `actions` 里已经有 type='催办'（人工）/ actionCode='review_remind'（系统扫描）的记录。
+          const acts = Array.isArray(item && item.actions) ? item.actions : []
+          const reminds = acts.filter((a) => a && (a.type === '催办' || a.actionCode === 'review_remind'))
+          const lastRemind = reminds.length > 0 ? reminds[reminds.length - 1] : null
+          const remindWho = textOf(lastRemind && (lastRemind.actorName || lastRemind.actor))
+          const remindHuman = lastRemind ? lastRemind.actorIsHuman !== false && remindWho !== '系统' : false
+          return {
+            id: textOf(item.id),
+            short: shortNo(item.id),
+            returnedAt: (reject && reject.createdAt) || item.returnedAt,
+            returnedCount: Number(item.returnedCount) || 0,
+            dueAt: item.dueAt || null,
+            reason: textOf(reject && reject.reason),
+            actor: reject ? (who || '督导') + (human ? '（人工退回）' : '（系统自动）') : '',
+            hasRejectRow: Boolean(reject),
+            remindCount: reminds.length,
+            remindAt: (lastRemind && lastRemind.createdAt) || null,
+            remindBy: lastRemind ? (remindHuman ? (remindWho || '督导') : '系统自动') : '',
+          }
+        })
         .sort((a, b) => String(b.returnedAt || '').localeCompare(String(a.returnedAt || '')))
     }
 
-    /** 同一门店不允许重复提交未完成的分析：后端有该店「进行中」检查单 → 锁；本地刚提交过 60s 内也锁。 */
-    function busyReasonOf(snapshot, storeId, now) {
+    /**
+     * 同一门店不允许重复提交未完成的分析：后端有该店「正在进行」检查单 → 锁；本地刚提交过 60s 内也锁。
+     *
+     * A-1.6 修正：**整改回拍不受本地 60s 锁限制**（isRework=true）——
+     * 回拍是督导退回后**要求做的下一步**，跟"手抖重复提交"不是一回事；真机上刚提交完就点
+     * 「整改后重新提交」，会看到按钮被这条 60s 锁按住（提示"同一门店不允许重复提交"，与他的意图相反）。
+     * 后端那条"该店已有正在分析/排队的单"的锁**保留**（那才是真正的并发保护）。
+     */
+    function busyReasonOf(snapshot, storeId, now, isRework) {
       const data = snapshot && typeof snapshot === 'object' ? snapshot : null
       const list = data && Array.isArray(data.inspections) ? data.inspections : []
       const key = textOf(storeId)
@@ -946,6 +1078,7 @@ window.__ModuleLoader__.load({
           return '这家门店已有一条正在分析 / 排队中的提交（' + textOf(item.id) + '）：请等它完成后再说。'
         }
       }
+      if (isRework === true) return ''
       if (submitState.lastStoreId === key && submitState.lastSubmittedAt && now - submitState.lastSubmittedAt < 60000) {
         return '刚提交过（' + clockOf(submitState.lastSubmittedAt) + '）：同一门店不允许重复提交未完成的分析，请稍后再试。'
       }
@@ -983,7 +1116,7 @@ window.__ModuleLoader__.load({
             title: CAPABILITY_CAPTURE + '：切到店长端并打开巡店自查面板',
             onClick: () => openCaptureScreen('board'),
           },
-          '📷 ' + CAPABILITY_CAPTURE,
+          CAPABILITY_CAPTURE,
         ),
         bridge.ready ? null : React.createElement('span', { className: 'gicu-chip', 'data-tone': 'warn' }, SHELL_MISSING_NOTICE),
       )
@@ -1045,8 +1178,9 @@ window.__ModuleLoader__.load({
       offlineEdge.onSnapshot(offline)
       const effectiveStore = storeId || (stores.length > 0 ? stores[0].storeId : '')
       const now = Date.now()
-      const busyReason = busyReasonOf(snap.data, effectiveStore, now)
       const pendingRework = pendingReworkOf(snap.data, effectiveStore)
+      // 整改回拍不受本地 60s 重复提交锁限制（见 busyReasonOf 注释）
+      const busyReason = busyReasonOf(snap.data, effectiveStore, now, Boolean(reworkOf))
 
       // 注：「正在整改回拍」的清空**不放在这里**——上一版用 `phase === 'done'` 的 effect 清，
       // 结果上一次提交留下的 done 会把刚点上的回拍标记当场清掉（真机实测踩过：点了整改回拍，
@@ -1177,12 +1311,21 @@ window.__ModuleLoader__.load({
       }
 
       // 门店下拉：三态齐全（读到了 / 正在读 / 读不到）——任何一态都不留白屏（契约 §3.3）
+      // B1：设计稿的下拉右侧有一枚 chevron-down（`icon_font` 节点之一），原生 select 装不下 SVG，
+      // 所以包一层只做定位的 span，把内联 SVG 压在右侧（pointer-events:none，不挡点击）。
       let storeField
       if (stores.length > 0) {
         storeField = React.createElement(
-          'select',
-          { className: 'gicu-select', value: effectiveStore, onChange: (event) => setStoreId(event && event.target ? event.target.value : '') },
-          stores.map((store) => React.createElement('option', { key: store.storeId, value: store.storeId }, store.label)),
+          'span',
+          { className: 'gicu-selectwrap', key: 'storewrap' },
+          [
+            React.createElement(
+              'select',
+              { className: 'gicu-select', key: 'sel', value: effectiveStore, onChange: (event) => setStoreId(event && event.target ? event.target.value : '') },
+              stores.map((store) => React.createElement('option', { key: store.storeId, value: store.storeId }, store.label)),
+            ),
+            React.createElement('span', { className: 'gicu-chev', key: 'chev' }, svgIcon('chevron-down', 20)),
+          ],
         )
       } else if (snap.failure) {
         storeField = React.createElement(
@@ -1254,7 +1397,7 @@ window.__ModuleLoader__.load({
                 addFiles(event && event.dataTransfer ? event.dataTransfer.files : null)
               },
             },
-            React.createElement('span', { className: 'cam' }, '📷'),
+            React.createElement('span', { className: 'cam' }, svgIcon('camera', 24)),
             React.createElement('span', { className: 't1' }, '点击选择照片，或把图片拖到这里'),
             React.createElement('span', { className: 't2' }, '支持 jpg / png，单张'),
           ),
@@ -1288,6 +1431,11 @@ window.__ModuleLoader__.load({
                 React.createElement('div', { className: 'gicu-rework-t gicu-num', key: 't' }, item.short + '　退回 ' + (clockOf(item.returnedAt) || '—') + (item.returnedCount > 1 ? '（共退回 ' + item.returnedCount + ' 次）' : '') + (item.actor ? '　由 ' + item.actor : '')),
                 React.createElement('div', { className: 'gicu-rework-r', key: 'r' }, '退回原因：' + (item.reason || '（后端未记录原因文本）')),
                 item.dueAt ? React.createElement('div', { className: 'gicu-rework-d gicu-num', key: 'd' }, '整改截止 ' + (clockOf(item.dueAt) || textOf(item.dueAt))) : null,
+                // 被督导催办过就写在脸上：改前「催办」只在督导端留一条记录，门店端什么都看不到 ——
+                // 用户实测："催办按钮是摆设，门店端不显示"。这里读同一条单的 actions（不加后端字段）。
+                item.remindCount > 0
+                  ? React.createElement('div', { className: 'gicu-rework-c gicu-num', key: 'c' }, '被催办 ' + item.remindCount + ' 次 · 最近 ' + (clockOf(item.remindAt) || '—') + (item.remindBy ? ' · ' + item.remindBy : ''))
+                  : null,
                 React.createElement(
                   'button',
                   {
