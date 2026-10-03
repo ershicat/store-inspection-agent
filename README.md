@@ -326,7 +326,7 @@ node 插件库/gaia-inspection-oversight-ui/test/selftest.mjs
 
 ---
 
-# 附一：评分项对照（自查用）
+# 附一：评分项对照
 
 | 评分项（来源：赛道评分标准） | 本仓库哪一处兑现 |
 |---|---|
