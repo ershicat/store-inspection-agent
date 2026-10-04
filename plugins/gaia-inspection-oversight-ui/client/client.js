@@ -1848,15 +1848,29 @@ window.__ModuleLoader__.load({
         React.createElement(
           'div',
           { className: 'giou-actions' },
-          // A-1.8：这一项**已经通过**时不许再点（改前按钮永远可点，点几次就写几条重复的「通过」记录，
-          // 看着还像"点了没生效" —— 真机验收就踩到了：同一项连点 8 次，单子还是待复核）。
+          // 这一项的动作**状态矩阵**（客户 10-03 裁定：通过 / 打回互斥 ——"不只是通过，打回之后也能再点通过"）：
+          //   未处置（新单）        → 通过 / 退回并说明 / 催办 都能点
+          //   已通过（本项已办结）  → **三个全禁**（不能退回、也不能催办）
+          //   已打回（等门店整改）  → **只留催办**（不能通过、不能重复退回）
+          //   被新轮取代（locked）  → 三个全禁（复核请到最新那一轮）
+          // 后端有同一套守卫（ALL_FINDINGS_PASSED / FINDING_ALREADY_REJECTED），两边口径一致。
           passed ? React.createElement('span', { className: 'giou-chip', 'data-tone': 'rectified', key: 'passed' }, '本项已通过') : null,
-          // locked = 这一轮已经被后面某一轮取代：动作全停用（否则会把订单搞成"已办结 + 还有待复核的轮"）。
-          React.createElement('button', { className: 'giou-btn', type: 'button', disabled: locked || passed || busyAction === 'approve', title: locked ? '这一轮已被最新一轮取代，动作已停用 —— 请到最新那一轮复核' : undefined, onClick: () => onAction({ type: 'approve', findingId: finding.findingId, reason: '' }) }, passed ? '已通过' : '通过'),
-          React.createElement('button', { className: 'giou-btn', type: 'button', disabled: locked, title: locked ? '这一轮已被最新一轮取代，动作已停用' : undefined, onClick: () => setAskReason(!askReason) }, finding.rejectedAt ? '重新退回并说明' : '退回并说明'),
-          React.createElement('button', { className: 'giou-btn', type: 'button', disabled: locked || busyAction === 'remind', title: locked ? '这一轮已被最新一轮取代，动作已停用' : undefined, onClick: () => onAction({ type: 'remind', findingId: finding.findingId, reason: '' }) }, '催办'),
+          ...(() => {
+            const rejected = Boolean(finding.rejectedAt)
+            const closed = Boolean(passed) || Boolean(locked)
+            const onlyRemind = !closed && rejected
+            const whyClosed = locked
+              ? '这一轮已被最新一轮取代，动作已停用 —— 请到最新那一轮复核'
+              : passed ? '这一项已经通过（本项已办结）：不能再退回或催办' : undefined
+            const whyRejected = '这一项已经退回给门店了：只能催办（复核请等门店回拍后的新一轮）'
+            return [
+              React.createElement('button', { className: 'giou-btn', type: 'button', key: 'approve', disabled: closed || onlyRemind || busyAction === 'approve', title: closed ? whyClosed : onlyRemind ? whyRejected : undefined, onClick: () => onAction({ type: 'approve', findingId: finding.findingId, reason: '' }) }, passed ? '已通过' : '通过'),
+              React.createElement('button', { className: 'giou-btn', type: 'button', key: 'reject', disabled: closed || onlyRemind, title: closed ? whyClosed : onlyRemind ? whyRejected : undefined, onClick: () => setAskReason(!askReason) }, rejected ? '已退回' : '退回并说明'),
+              React.createElement('button', { className: 'giou-btn', type: 'button', key: 'remind', disabled: closed || busyAction === 'remind', title: closed ? whyClosed : undefined, onClick: () => onAction({ type: 'remind', findingId: finding.findingId, reason: '' }) }, '催办'),
+            ]
+          })(),
         ),
-        askReason
+        askReason && !passed && !locked && !finding.rejectedAt
           ? React.createElement(
               'div',
               null,

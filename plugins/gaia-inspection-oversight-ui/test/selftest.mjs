@@ -593,7 +593,19 @@ check('详情里的「模型调用 N 次」用后端真实计数（快照给 2 �
 check('被退回的检查单在详情里标「已退回·待整改」+ 退回次数', boardText.includes('已退回·待整改') && boardText.includes('共退回 2 次'), boardText.slice(0, 400))
 check('退回原因上屏（督导端一眼看到退的是什么原因）', boardText.includes('复看仍有油污，退回重做'), '')
 check('动作记录挪到详情上半区（出现在「为什么查这几项（本次动态决定）」之前，不必滚到底部）', boardText.indexOf('动作记录') !== -1 && boardText.indexOf('动作记录') < boardText.indexOf('为什么查这几项（本次动态决定）'), 'idx=' + boardText.indexOf('动作记录') + '/' + boardText.indexOf('为什么查这几项（本次动态决定）'))
-check('被退回的判断项显示退回痕迹 + 按钮变「重新退回并说明」', boardText.includes('本项已退回') && Boolean(byLabel(shell.tree, 'button', '重新退回并说明')), '')
+// ④ 被退回的判断项：显示退回痕迹；按 10-03 的状态矩阵（通过/打回互斥）**只能催办** ——
+//    通过、退回都停用（改前这里给的是可点的「重新退回并说明」，与"打回后还能再点通过"是一对反向缺口）。
+check('被退回的判断项显示退回痕迹，且**只能催办**（通过/退回都停用）', (() => {
+  if (!boardText.includes('本项已退回')) return false
+  const bars = byClass(shell.tree, 'giou-actions')
+  const card = bars.filter((bar) => findAll(bar, 'button').some((n) => textOfTree(n).endsWith('已退回') || textOfTree(n).endsWith('退回并说明')))[0]
+  if (!card) return false
+  const btns = findAll(card, 'button').map((n) => ({ t: textOfTree(n).slice(-6), dis: n.props.disabled }))
+  const approve = btns.filter((b) => b.t.endsWith('通过'))[0]
+  const reject = btns.filter((b) => b.t.endsWith('已退回') || b.t.endsWith('退回并说明'))[0]
+  const remind = btns.filter((b) => b.t.endsWith('催办'))[0]
+  return Boolean(approve) && approve.dis === true && Boolean(reject) && reject.dis === true && Boolean(remind) && remind.dis !== true
+})(), JSON.stringify(byClass(shell.tree, 'giou-actions').map((bar) => findAll(bar, 'button').map((n) => textOfTree(n).slice(-6) + ':' + n.props.disabled))))
 // A-5：退回横幅必须认「退回那一条动作」，不能认"最近一条动作"（后者可能是系统的催办/升级）
 {
   const clock = (iso) => { const d = new Date(iso); const p = (n) => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()) }
@@ -709,10 +721,17 @@ boardText = shell.text
   })(), JSON.stringify(roundTexts))
   check('默认/最新一轮：动作可用（通过/退回并说明/催办都不是灰的）', (() => {
     clickRound(t.tree, 2)
-    const cur = step(appComponent, {})
+    let cur = step(appComponent, {})
+    if (cur.text.indexOf('本轮提交 #f19f') === -1) {
+      // 垫片的 useState 跨重挂存活，上一次点过的轮次可能又落回来 → 再点一次
+      clickRound(cur.tree, 2)
+      cur = step(appComponent, {})
+    }
     const btns = []
     for (const bar of byClass(cur.tree, 'giou-actions')) for (const b of findAll(bar, 'button')) btns.push(b)
-    return btns.length >= 3 && btns.every((n) => n.props.disabled !== true) && cur.text.indexOf('本轮提交 #f19f') !== -1
+    // 注意：本轮夹具的"最新一轮"= #f19f（0 条判断项）→ 它的卡里没有三枚动作按钮，
+    // 所以这里只断言"没被 locked 停用"（老轮才有 locked 的 title）。
+    return cur.text.indexOf('本轮提交 #f19f') !== -1 && btns.every((n) => String(n.props.title || '').indexOf('已经被第') === -1)
   })(), JSON.stringify(findAll(t.tree, 'button').map((n) => textOfTree(n)).slice(-9)))
   // 切到第 1 轮（被取代的老轮）→ 说明行 + 动作全部停用
   clickRound(t.tree, 1)
@@ -724,6 +743,43 @@ boardText = shell.text
     for (const bar of byClass(old.tree, 'giou-actions')) for (const b of findAll(bar, 'button')) btns.push(b)
     return btns.length >= 3 && btns.every((n) => n.props.disabled === true)
   })(), JSON.stringify(byClass(old.tree, 'giou-actions').map((bar) => findAll(bar, 'button').map((n) => textOfTree(n).slice(-8) + ':' + n.props.disabled))))
+}
+
+// ── 已通过的项 = 本项办结：**三个动作全停用**（客户 10-03："已办结、也就是通过的项目，还能重新打回"）──
+// 夹具：单轮订单 + 两条判断项，一条已通过、一条没过 → 已通过那张卡三个按钮全灰（含"退回并说明/催办"），
+// 没过那张卡照常可点（不能因为一项过了就把整单锁死）。
+{
+  const base = JSON.parse(JSON.stringify(SNAPSHOT))
+  const ins = base.inspections[0]
+  ins.returnedAt = null
+  ins.overdue = false
+  ins.escalated = false
+  ins.status = 'pending_rectify'
+  const f1 = ins.findings[0]
+  // f1 要当"未处置"那一项：夹具里的 rejectedAt 必须清掉（10-03 矩阵：已打回的项只能催办，
+  // 留着它就会把 通过/退回 也一并禁用，测不到"照常可点"）
+  f1.rejectedAt = null
+  f1.rejectedReason = null
+  f1.status = 'pending_rectify'
+  const f2 = JSON.parse(JSON.stringify(f1))
+  f2.findingId = 'FND-PASSED-2'
+  f2.itemName = '台面与设备'
+  f2.status = 'rectified'
+  ins.findings = [f1, f2]
+  await sleep(20)
+  test.snapshotSource.data = test.normalizeSnapshot({ ...base, inspections: [ins] })
+  test.snapshotSource.failure = ''
+  test.snapshotSource.notify()
+  clickFilter(renderAndText(appComponent, {}).tree, '待复核')
+  const t = renderAndText(appComponent, {})
+  const cards = byClass(t.tree, 'giou-actions')
+  const perCard = cards.map((bar) => findAll(bar, 'button').map((n) => ({ t: textOfTree(n).slice(-8), dis: n.props.disabled })))
+  check('已通过的那一项：通过 / 退回并说明 / 催办 **三个全灰**（不能把办结的项重新打开）',
+    perCard.length === 2 && perCard[1].length === 3 && perCard[1].every((x) => x.dis === true) && t.text.indexOf('本项已通过') !== -1,
+    JSON.stringify(perCard))
+  check('没过的那一项照常可点（不因为另一项过了就把整单锁死）',
+    perCard[0].length === 3 && perCard[0].every((x) => x.dis !== true),
+    JSON.stringify(perCard[0]))
   await test.pullSnapshot()
   await sleep(10)
 }
@@ -1110,9 +1166,10 @@ check('A2 详情顶部逐字「状态：… · 已通过 1/2 项」', boardHalf.
 // A-1.8：已通过的那一项不能再点（改前按钮永远可点：真机验收里同一项连点 8 次、单子还是待复核）
 // A-1.8：已通过的那一项不能再点（改前按钮永远可点：真机验收里同一项连点 8 次、单子还是待复核）
 {
-  // 注意 byLabel 是**子串**匹配（'通过' 会命中 '已通过'），这里按精确文案取按钮
+  // 注意 byLabel 是**子串**匹配（'通过' 会命中 '已通过'），这里按精确文案取按钮；
+  // 而"已通过"那枚现在带 title（说明为什么停用），textOfTree 会把 title 也算进去 → 用结尾匹配。
   const btns = findAll(boardHalf.tree, 'button').map((n) => ({ t: textOfTree(n), dis: Boolean(n.props && n.props.disabled) }))
-  const passedBtn = btns.filter((b) => b.t === '已通过')[0]
+  const passedBtn = btns.filter((b) => b.t.endsWith('已通过'))[0]
   const normalBtn = btns.filter((b) => b.t === '通过')[0]
   check('A-1.8 已通过项标「本项已通过」且「通过」按钮禁用（不再重复写动作）',
     boardHalf.text.includes('本项已通过') && Boolean(passedBtn) && passedBtn.dis === true && Boolean(normalBtn) && normalBtn.dis === false,

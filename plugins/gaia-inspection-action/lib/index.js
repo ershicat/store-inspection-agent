@@ -267,7 +267,16 @@ export async function apply(ctx, config = {}) {
     if (findingId && findings.length === 0) return { ok: false, error: { code: 'FINDING_NOT_FOUND', message: `该检查单下没有这条判断：${findingId}` } }
 
     if (kind === '通过') {
-      for (const f of findings) d.put('findings', { ...f, id: f.id, status: 'rectified', rectifiedAt: atIso, rectifiedBy: actorName || actor })
+      // 状态矩阵（客户 10-03）：通过 / 打回**互斥** —— 已被打回的项不能再点通过（复核在新一轮上做）。
+      // 逐项（给了 findingId）→ 结构化拒绝；批量（没给）→ 跳过已打回的项，只通过剩下的。
+      if (findingId && findings[0] && findings[0].rejectedAt) {
+        return { ok: false, error: { code: 'FINDING_ALREADY_REJECTED', message: '这一项已经退回给门店（只能催办）：复核请在门店回拍后的新一轮上做。' } }
+      }
+      const targets = findings.filter((f) => !f.rejectedAt)
+      if (targets.length === 0) {
+        return { ok: false, error: { code: 'FINDING_ALREADY_REJECTED', message: '这些判断项都已经退回给门店（只能催办）：复核请在门店回拍后的新一轮上做。' } }
+      }
+      for (const f of targets) d.put('findings', { ...f, id: f.id, status: 'rectified', rectifiedAt: atIso, rectifiedBy: actorName || actor })
       const rest = d.where('findings', (f) => f.inspectionId === ins.id && f.status !== 'rectified')
       const allDone = rest.length === 0
       // 办结守卫：本单名下还有未办结的回拍轮 → 本单**不许**置 rectified（订单状态以最新一轮为准）。
@@ -330,11 +339,21 @@ export async function apply(ctx, config = {}) {
     if (kind === '退回并说明') {
       const reason = String(args.reason || '').trim()
       if (!reason) return { ok: false, error: { code: 'REASON_REQUIRED', message: '退回必须带说明文本（reason）：界面要把这段说明写给店长看。' } }
+      // 已通过的项**不许再被处置**（客户 10-03："已办结、也就是通过的项目，还能重新打回"）；
+      // 已打回的项**也不许重复退回**（同一个状态矩阵：打回之后只能催办）。
+      const unpassed = findings.filter((f) => String(f.status || '').toLowerCase() !== 'rectified')
+      const actionable = unpassed.filter((f) => !f.rejectedAt)
+      if (actionable.length === 0) {
+        if (unpassed.length === 0) {
+          return { ok: false, error: { code: 'ALL_FINDINGS_PASSED', message: `${findingId ? '这一项' : '本单的判断项'}已经通过（本项已办结）：不能再退回。要让门店重做，请在门店端重新提交一轮（整改回拍）。` } }
+        }
+        return { ok: false, error: { code: 'FINDING_ALREADY_REJECTED', message: `${findingId ? '这一项' : '这些判断项'}已经退回给门店了：只能催办（不能重复退回）。` } }
+      }
       // 退回 = 对"还要整改"的重新认定 → **重算整改截止**（默认 退回时刻 + 8h，见 REJECT_DUE_HOURS）。
       // 改前是"不传 newDueHours 就沿用原单 dueAt"，于是店长可能只剩几十分钟（真机 #uzrn 只剩 2 小时）。
       const hours = Number(args.newDueHours) > 0 ? Number(args.newDueHours) : REJECT_DUE_HOURS
       const dueAt = new Date(Date.now() + hours * 3600 * 1000).toISOString()
-      for (const f of findings) {
+      for (const f of actionable) {
         d.put('findings', { ...f, id: f.id, status: 'pending_rectify', dueAt: dueAt || f.dueAt || null, rejectedAt: atIso, rejectedReason: reason })
       }
       // 给了新窗口，旧的「逾期 / 已升级」标记必须一起清掉：否则界面会出现"截止还在未来、却挂着逾期/已升级"
@@ -364,10 +383,15 @@ export async function apply(ctx, config = {}) {
         actorIsHuman: true,
         result: '退回',
       })
-      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: updated.status, dueAt: updated.dueAt, rejectedFindings: findings.map((f) => f.id) } }
+      return { ok: true, data: { inspectionId: ins.id, actionId: a.id, action: a, inspectionStatus: updated.status, dueAt: updated.dueAt, rejectedFindings: actionable.map((f) => f.id), skippedPassedFindings: findings.filter((f) => String(f.status || '').toLowerCase() === 'rectified').map((f) => f.id) } }
     }
 
     if (kind === '催办') {
+      // 同一条口径：**已通过的项不催**（它已经办结了，催它没有意义，也会在界面上看起来像"打回去还能催"）。
+      const actionable = findings.filter((f) => String(f.status || '').toLowerCase() !== 'rectified')
+      if (actionable.length === 0) {
+        return { ok: false, error: { code: 'ALL_FINDINGS_PASSED', message: `${findingId ? '这一项' : '本单的判断项'}已经通过（本项已办结）：不需要催办。` } }
+      }
       const reason = String(args.reason || '').trim() || `督导人工催办（当前状态：${ins.status}）`
       const a = d.put('actions', {
         inspectionId: ins.id,
